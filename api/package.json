@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/api/src/index.js",
-    "test": "tsx --test src/lib/storage/endpointGuard.test.ts src/lib/storage/bindingResolution.test.ts src/lib/secretBox.test.ts src/modules/admin/admin.redaction.test.ts src/lib/storage/byoc.integration.test.ts src/modules/letters/letter.hardening.test.ts src/lib/database.orderby.test.ts src/modules/letters/letterAi.parseJson.test.ts ../shared/signing.test.ts"
+    "test": "tsx --test src/lib/storage/endpointGuard.test.ts src/lib/storage/bindingResolution.test.ts src/lib/secretBox.test.ts src/modules/admin/admin.redaction.test.ts src/lib/storage/byoc.integration.test.ts src/modules/letters/letter.hardening.test.ts src/lib/database.orderby.test.ts src/modules/letters/letterAi.parseJson.test.ts ../shared/signing.test.ts src/modules/webreports/urlSafety.test.ts src/modules/webreports/scoring.test.ts src/modules/webreports/checks.test.ts src/modules/webreports/crawl.test.ts src/modules/webreports/webreports.service.test.ts src/modules/webreports/webreports.integration.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.500.0",
@@ -30,6 +30,7 @@
     "google-auth-library": "^10.9.1",
     "helmet": "^7.1.0",
     "ioredis": "^5.3.2",
+    "ipaddr.js": "^1.9.1",
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.9.2",
     "node-forge": "^1.4.0",

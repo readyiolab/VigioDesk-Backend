@@ -6,21 +6,27 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/worker/src/index.js"
+    "start": "node dist/worker/src/index.js",
+    "test": "tsx --test src/webreports/parsePage.test.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "@aws-sdk/client-s3": "^3.1101.0",
     "@azure/storage-blob": "^12.33.0",
     "archiver": "^6.0.1",
     "bullmq": "^5.1.0",
+    "cheerio": "^1.2.0",
     "dotenv": "^16.4.5",
     "express": "^4.18.2",
     "ioredis": "^5.3.2",
+    "ipaddr.js": "^1.9.1",
+    "lighthouse": "^12.8.2",
     "mysql2": "^3.9.2",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
     "pino": "^8.19.0",
     "puppeteer": "^25.5.0",
+    "robots-parser": "^3.0.1",
     "sharp": "^0.33.2",
     "zod": "^3.22.4"
   },

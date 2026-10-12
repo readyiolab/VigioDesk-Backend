@@ -6,6 +6,7 @@ import { initializeByocSchema } from './byocSchema';
 import { initializeLetterSchema } from './letterSchema';
 import { initializeDiagramSchema } from './diagramSchema';
 import { initializeCustomerTrackingSchema } from './customerTrackingSchema';
+import { initializeWebReportSchema } from './webreportSchema';
 import { seedPlatformAdmin } from './seedPlatformAdmin';
 import { db } from './database';
 
@@ -137,6 +138,7 @@ async function initializeDatabase(dbPool: Pool): Promise<void> {
     await initializeLetterSchema(conn);
     await initializeDiagramSchema(conn);
     await initializeCustomerTrackingSchema(conn);
+    await initializeWebReportSchema(conn);
     await seedPlatformAdmin(conn);
 
     logger.info('Prefixed database tables (tbl_) initialization complete.');

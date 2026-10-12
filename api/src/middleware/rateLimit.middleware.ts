@@ -164,3 +164,39 @@ export const enterpriseStorageLimiter = rateLimit({
     message: 'Too many storage connection attempts. Please try again in an hour.',
   },
 });
+
+/** New website audits. Keyed by user so one account cannot fan out scans. */
+export const webreportsCreateLimiter = rateLimit({
+  ...common,
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  store: redisStore('rl:webreports-create:'),
+  keyGenerator: (req) => (req as { user?: { id?: string } }).user?.id || req.ip || 'anon',
+  message: {
+    status: 'error',
+    message: 'Too many scans. Please try again later.',
+  },
+});
+
+/** Report polling. Short requests, higher ceiling than scan creation. */
+export const webreportsPollLimiter = rateLimit({
+  ...common,
+  windowMs: 60 * 1000,
+  max: 120,
+  store: redisStore('rl:webreports-poll:'),
+  message: {
+    status: 'error',
+    message: 'Too many status checks, slowing down.',
+  },
+});
+
+export const webreportsPublicLimiter = rateLimit({
+  ...common,
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  store: redisStore('rl:webreports-public:'),
+  message: {
+    status: 'error',
+    message: 'Too many requests. Please try again in a few minutes.',
+  },
+});

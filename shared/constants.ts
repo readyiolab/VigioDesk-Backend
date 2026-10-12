@@ -64,6 +64,12 @@ export interface PlanLimits {
   maxLetterBatchRows: number;
   /** Whether the plan may send letters via connected Outlook/Gmail. */
   letterSendingEnabled: boolean;
+  /** Website audits a plan may start per rolling 24 hours. */
+  maxDailyWebReports: number;
+  /** Queued or running website audits at once. */
+  maxConcurrentWebReports: number;
+  /** Pages a single website audit may crawl. */
+  maxWebReportPages: number;
 }
 
 export const PLAN_LIMITS: Record<'FREE' | 'PRO' | 'ENTERPRISE', PlanLimits> = {
@@ -75,6 +81,9 @@ export const PLAN_LIMITS: Record<'FREE' | 'PRO' | 'ENTERPRISE', PlanLimits> = {
     maxMonthlyAiCredits: 20, // a taste of AI; upgrade for real use
     maxLetterBatchRows: 5,
     letterSendingEnabled: false,
+    maxDailyWebReports: 3,
+    maxConcurrentWebReports: 1,
+    maxWebReportPages: 10,
   },
   PRO: {
     maxDailyOps: 1000, // Practically unlimited compared to 5, but provides a safety guardrail
@@ -84,6 +93,9 @@ export const PLAN_LIMITS: Record<'FREE' | 'PRO' | 'ENTERPRISE', PlanLimits> = {
     maxMonthlyAiCredits: 500, // generous, but bounds runaway token spend
     maxLetterBatchRows: 500,
     letterSendingEnabled: true,
+    maxDailyWebReports: 30,
+    maxConcurrentWebReports: 2,
+    maxWebReportPages: 50,
   },
   ENTERPRISE: {
     maxDailyOps: 10_000,
@@ -93,6 +105,9 @@ export const PLAN_LIMITS: Record<'FREE' | 'PRO' | 'ENTERPRISE', PlanLimits> = {
     maxMonthlyAiCredits: 10_000,
     maxLetterBatchRows: 5_000,
     letterSendingEnabled: true,
+    maxDailyWebReports: 100,
+    maxConcurrentWebReports: 3,
+    maxWebReportPages: 50,
   },
 };
 
@@ -104,5 +119,7 @@ export const LETTER_SEND_QUEUE = 'letter-send';
 export const LETTER_ZIP_QUEUE = 'letter-zip';
 /** Offload AI PDF text extraction from the API process. */
 export const AI_EXTRACT_QUEUE = 'ai-extract';
+/** Website audits. Consumed only by the dedicated webreports worker. */
+export const WEBREPORTS_QUEUE = 'webreports';
 
 export const SUPPORTED_TOOLS: ToolName[] = [...HEAVY_TOOLS, ...LIGHT_TOOLS];

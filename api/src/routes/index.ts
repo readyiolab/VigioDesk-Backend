@@ -12,6 +12,8 @@ import adminRoutes from '../modules/admin/admin.routes';
 import orgsRoutes from '../modules/orgs/orgs.routes';
 import lettersRoutes from '../modules/letters/letters.routes';
 import trackingRoutes from '../modules/tracking/tracking.routes';
+import webreportsRoutes from '../modules/webreports/webreports.routes';
+import publicWebReportsRoutes from '../modules/webreports/public.routes';
 
 const router = Router();
 
@@ -31,5 +33,7 @@ router.use('/admin', adminRoutes);
 router.use('/orgs', orgsRoutes);
 router.use('/letters', lettersRoutes);
 router.use('/tracking', trackingRoutes);
+router.use('/public/webreports', publicWebReportsRoutes);
+router.use('/webreports', webreportsRoutes);
 
 export default router;

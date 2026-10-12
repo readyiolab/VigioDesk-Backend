@@ -181,6 +181,16 @@ const envSchema = z.object({
   // ~4 chars/token, so 400k ≈ 100k tokens — within a 128k context with room
   // for the answer, and a guard against a huge PDF blowing up cost.
   AI_MAX_TEXT_CHARS: z.coerce.number().default(400_000),
+
+  // Readyio WebReports. Optional keys must not prevent boot.
+  PSI_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  WEBREPORTS_MAX_PAGES: z.coerce.number().int().min(1).max(200).default(50),
+  WEBREPORTS_CACHE_TTL_MINUTES: z.coerce.number().int().min(1).max(24 * 60).default(30),
+  WEBREPORTS_WEIGHT_MOBILE: z.coerce.number().optional(),
+  WEBREPORTS_WEIGHT_DESKTOP: z.coerce.number().optional(),
+  WEBREPORTS_WEIGHT_SEO: z.coerce.number().optional(),
+  WEBREPORTS_WEIGHT_AI: z.coerce.number().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
