@@ -35,3 +35,8 @@ export function canPersistJob(
 export function isTerminal(status: ReportStatus): boolean {
   return status === 'completed' || status === 'failed';
 }
+
+/** BullMQ custom ids cannot contain a colon unless they have exactly three segments. */
+export function webReportJobId(reportId: string, generation: number): string {
+  return `${reportId}_${generation}`;
+}

@@ -1,6 +1,7 @@
 import { Queue } from 'bullmq';
 import { redis } from './redis';
 import { WEBREPORTS_QUEUE } from '../../../shared/constants';
+import { webReportJobId } from '../../../shared/webreports/lifecycle';
 import { logger } from './logger';
 
 export interface WebReportJob {
@@ -19,9 +20,7 @@ export const webreportsQueue = new Queue<WebReportJob>(WEBREPORTS_QUEUE, {
   },
 });
 
-export function webReportJobId(reportId: string, generation: number): string {
-  return `${reportId}:${generation}`;
-}
+export { webReportJobId };
 
 export async function enqueueWebReport(job: WebReportJob): Promise<void> {
   const jobId = webReportJobId(job.reportId, job.generation);

@@ -1,6 +1,7 @@
 import express from 'express';
 import { Worker, Queue } from 'bullmq';
 import { WEBREPORTS_QUEUE } from '../../shared/constants';
+import { webReportJobId } from '../../shared/webreports/lifecycle';
 import { weightsFromEnv } from '../../shared/webreports/scoringConfig';
 import { env } from './webreports/env';
 import { execute, logger, pool, queryAll, redis } from './webreports/runtime';
@@ -63,7 +64,7 @@ async function recover(): Promise<void> {
          FROM tbl_webreport WHERE status IN ('queued', 'running')`
     );
     for (const row of rows) {
-      const jobId = `${row.id}:${row.jobGeneration}`;
+      const jobId = webReportJobId(row.id, row.jobGeneration);
       if (row.status === 'running') {
         const started = new Date(row.startedAt || row.createdAt).getTime();
         if (Date.now() - started > env.WEBREPORTS_SCAN_TIMEOUT_MS + 60_000) {
