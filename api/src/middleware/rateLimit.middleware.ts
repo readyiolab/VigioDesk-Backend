@@ -34,12 +34,11 @@ export const rateLimiter = rateLimit({
 });
 
 // Strict limiter for auth endpoints — brute-force protection.
-// Fail closed when Redis is down: better to reject logins than allow unbounded attempts.
 export const authRateLimiter = rateLimit({
   ...common,
-  passOnStoreError: false,
+  passOnStoreError: process.env.NODE_ENV === 'development' ? true : false,
   windowMs: 15 * 60 * 1000,
-  max: 10, // 10 login/register attempts per IP per 15 min
+  max: process.env.NODE_ENV === 'development' ? 100 : 10,
   store: redisStore('rl:auth:'),
   skipSuccessfulRequests: true, // only count failed attempts against the limit
   message: {
