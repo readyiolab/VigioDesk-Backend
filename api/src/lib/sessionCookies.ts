@@ -4,7 +4,14 @@ import { env } from '../config/env';
 export const SESSION_COOKIE = 'saas_session';
 export const REFRESH_COOKIE = 'saas_refresh';
 
+function getEffectiveCookieDomain(): string | undefined {
+  if (env.COOKIE_DOMAIN) return env.COOKIE_DOMAIN;
+  if (env.NODE_ENV === 'production') return '.zuvigo.com';
+  return undefined;
+}
+
 function baseCookieOpts(maxAgeMs: number): CookieOptions {
+  const domain = getEffectiveCookieDomain();
   const opts: CookieOptions = {
     httpOnly: true,
     secure: env.NODE_ENV === 'production',
@@ -12,8 +19,8 @@ function baseCookieOpts(maxAgeMs: number): CookieOptions {
     path: '/',
     maxAge: maxAgeMs,
   };
-  if (env.COOKIE_DOMAIN) {
-    opts.domain = env.COOKIE_DOMAIN;
+  if (domain) {
+    opts.domain = domain;
   }
   return opts;
 }
@@ -38,7 +45,7 @@ export function setSessionCookies(
 }
 
 export function clearSessionCookies(res: Response): void {
-  const clearOpts: CookieOptions = { path: '/', domain: env.COOKIE_DOMAIN || undefined };
+  const clearOpts: CookieOptions = { path: '/', domain: getEffectiveCookieDomain() };
   res.clearCookie(SESSION_COOKIE, clearOpts);
   res.clearCookie(REFRESH_COOKIE, clearOpts);
 }

@@ -46,7 +46,7 @@ const envSchema = z.object({
   CORS_ORIGINS: z
     .string()
     .default(
-      'http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:3000,http://localhost:5000,http://127.0.0.1:5173'
+      'https://pdf.zuvigo.com,https://diagrams.zuvigo.com,https://letters.zuvigo.com,https://suite.zuvigo.com,https://zuvigo.com,http://localhost:4101,http://localhost:4102,http://localhost:4103,http://localhost:4104,http://localhost:3000,http://localhost:5000,http://localhost:5173,http://localhost:5174,http://localhost:5175,http://127.0.0.1:5173'
     ),
   // Max JSON request body size (protects against large-payload DoS)
   MAX_JSON_BODY: z.string().default('100kb'),
