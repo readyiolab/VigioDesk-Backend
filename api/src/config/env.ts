@@ -156,9 +156,17 @@ const envSchema = z.object({
   TSA_URL: z.string().url().default('https://freetsa.org/tsr'),
   TSA_ENABLED: envBool(true),
 
-  // Optional Microsoft Graph (Outlook) OAuth for Letter Studio sending
+  // Optional Microsoft Graph (OneDrive & SharePoint & Outlook) OAuth
   MICROSOFT_CLIENT_ID: z.string().optional(),
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
+
+  // Optional Dropbox OAuth credentials
+  DROPBOX_CLIENT_ID: z.string().optional(),
+  DROPBOX_CLIENT_SECRET: z.string().optional(),
+
+  // Optional Box OAuth credentials
+  BOX_CLIENT_ID: z.string().optional(),
+  BOX_CLIENT_SECRET: z.string().optional(),
 
   // --- AI (OpenAI) ---
   // Powers Chat/Summarize/Explain over PDFs. Optional so the API still boots
