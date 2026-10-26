@@ -92,8 +92,8 @@ export async function saveCompleted(input: {
     await conn.query(`DELETE FROM tbl_webreport_page WHERE reportId = ?`, [input.reportId]);
     await conn.query(`DELETE FROM tbl_webreport_check WHERE reportId = ?`, [input.reportId]);
     await conn.query(`DELETE FROM tbl_webreport_perf WHERE reportId = ?`, [input.reportId]);
-    for (const page of input.pages) await insertPage(conn, input.reportId, page);
-    for (const check of input.checks) await insertCheck(conn, input.reportId, check);
+    await insertPagesBatch(conn, input.reportId, input.pages);
+    await insertChecksBatch(conn, input.reportId, input.checks);
     await insertPerf(conn, input.reportId, 'mobile', input.mobile);
     await insertPerf(conn, input.reportId, 'desktop', input.desktop);
     await conn.query(
@@ -131,37 +131,35 @@ export async function saveCompleted(input: {
   }
 }
 
-async function insertPage(conn: PoolConnection, reportId: string, page: PageSnapshot) {
-  const diagnostics = {
-    headings: page.headings.slice(0, 40),
-    h1: page.h1.slice(0, 10),
-    internalLinkCount: page.internalLinks.length,
-    externalLinkCount: page.externalLinks.length,
-    imageCount: page.imageCount,
-    imagesMissingAlt: page.imagesMissingAlt,
-    robotsMeta: page.robotsMeta,
-    viewport: page.viewport,
-    hreflang: page.hreflang.slice(0, 20),
-    openGraph: page.openGraph,
-    redirectChain: page.redirectChain.slice(0, 8),
-    indexable: page.indexable,
-    author: page.author,
-    published: page.published,
-    modified: page.modified,
-    listCount: page.listCount,
-    tableCount: page.tableCount,
-    rawVisibleTextLength: page.rawVisibleTextLength,
-    renderedVisibleTextLength: page.renderedVisibleTextLength,
-    finalUrl: page.finalUrl,
-    schemaErrors: page.schemaErrors.slice(0, 5),
-    timedOut: page.timedOut,
-    inconclusive: page.inconclusive,
-  };
-  await conn.query(
-    `INSERT INTO tbl_webreport_page
-      (id, reportId, url, statusCode, title, metaDescription, canonical, h1Count, wordCount, responseMs, sizeBytes, schemaTypes, issues, diagnostics)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
+async function insertPagesBatch(conn: PoolConnection, reportId: string, pages: PageSnapshot[]) {
+  if (!pages.length) return;
+  const values = pages.map((page) => {
+    const diagnostics = {
+      headings: page.headings.slice(0, 40),
+      h1: page.h1.slice(0, 10),
+      internalLinkCount: page.internalLinks.length,
+      externalLinkCount: page.externalLinks.length,
+      imageCount: page.imageCount,
+      imagesMissingAlt: page.imagesMissingAlt,
+      robotsMeta: page.robotsMeta,
+      viewport: page.viewport,
+      hreflang: page.hreflang.slice(0, 20),
+      openGraph: page.openGraph,
+      redirectChain: page.redirectChain.slice(0, 8),
+      indexable: page.indexable,
+      author: page.author,
+      published: page.published,
+      modified: page.modified,
+      listCount: page.listCount,
+      tableCount: page.tableCount,
+      rawVisibleTextLength: page.rawVisibleTextLength,
+      renderedVisibleTextLength: page.renderedVisibleTextLength,
+      finalUrl: page.finalUrl,
+      schemaErrors: page.schemaErrors.slice(0, 5),
+      timedOut: page.timedOut,
+      inconclusive: page.inconclusive,
+    };
+    return [
       crypto.randomUUID(),
       reportId,
       page.finalUrl.slice(0, 2048),
@@ -176,30 +174,38 @@ async function insertPage(conn: PoolConnection, reportId: string, page: PageSnap
       JSON.stringify(page.schemaTypes.slice(0, 30)),
       JSON.stringify(page.schemaErrors.slice(0, 5)),
       JSON.stringify(diagnostics),
-    ]
+    ];
+  });
+  await conn.query(
+    `INSERT INTO tbl_webreport_page
+      (id, reportId, url, statusCode, title, metaDescription, canonical, h1Count, wordCount, responseMs, sizeBytes, schemaTypes, issues, diagnostics)
+     VALUES ?`,
+    [values]
   );
 }
 
-async function insertCheck(conn: PoolConnection, reportId: string, check: AuditCheck) {
+async function insertChecksBatch(conn: PoolConnection, reportId: string, checks: AuditCheck[]) {
+  if (!checks.length) return;
+  const values = checks.map((check) => [
+    crypto.randomUUID(),
+    reportId,
+    check.category,
+    check.id,
+    check.status,
+    check.severity,
+    check.title.slice(0, 240),
+    check.description.slice(0, 2000),
+    check.affectedCount,
+    JSON.stringify(check.affectedUrls.slice(0, 20)),
+    check.fix.slice(0, 4000),
+    check.impact,
+    check.effort,
+  ]);
   await conn.query(
     `INSERT INTO tbl_webreport_check
       (id, reportId, category, checkId, status, severity, title, description, affectedCount, affectedUrls, fix, impact, effort)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      crypto.randomUUID(),
-      reportId,
-      check.category,
-      check.id,
-      check.status,
-      check.severity,
-      check.title.slice(0, 240),
-      check.description.slice(0, 2000),
-      check.affectedCount,
-      JSON.stringify(check.affectedUrls.slice(0, 20)),
-      check.fix.slice(0, 4000),
-      check.impact,
-      check.effort,
-    ]
+     VALUES ?`,
+    [values]
   );
 }
 

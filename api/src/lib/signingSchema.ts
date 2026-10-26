@@ -206,7 +206,7 @@ export async function initializeSigningSchema(conn: PoolConnection): Promise<voi
   await ensureIndex(conn, 'tbl_sign_recipient', 'idx_sign_recipient_order', 'documentId, signingOrder');
   await ensureIndex(conn, 'tbl_sign_recipient', 'idx_sign_recipient_doc_status', 'documentId, status');
   await ensureIndex(conn, 'tbl_sign_field', 'idx_sign_field_doc_page', 'documentId, page');
-  await ensureIndex(conn, 'tbl_sign_audit', 'idx_sign_audit_doc_created', 'documentId, createdAt');
+  await ensureIndex(conn, 'tbl_sign_field', 'idx_sign_field_doc_recipient', 'documentId, recipientId');
   await ensureIndex(conn, 'tbl_sign_audit', 'idx_sign_audit_doc_created_id', 'documentId, createdAt, id');
 
   // Templates — reusable recipient roles + field layouts (PDF cloned on save).

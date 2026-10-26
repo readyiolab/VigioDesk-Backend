@@ -12,7 +12,7 @@ const envSchema = z.object({
   DB_USER: z.string().default('root'),
   DB_PASSWORD: z.string().default(''),
   DB_NAME: z.string().default('pdf_saas'),
-  DB_CONNECTION_LIMIT: z.coerce.number().default(10),
+  DB_CONNECTION_LIMIT: z.coerce.number().default(20),
   REDIS_URL: z.string().url(),
   
   // DigitalOcean Spaces

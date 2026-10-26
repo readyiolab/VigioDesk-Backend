@@ -5,7 +5,7 @@ import { redis } from './redis';
 // the MySQL hot path. TTL is deliberately short so a deleted/downgraded/verified
 // account can't linger long; plan / BYOC changes also invalidate explicitly.
 const PREFIX = 'user:auth:';
-const TTL_SECONDS = 30;
+const TTL_SECONDS = 300; // 5 minutes (invalidated explicitly on plan/org/status updates)
 
 export interface CachedUser {
   id: string;

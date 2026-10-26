@@ -106,16 +106,20 @@ async function expireSignDocuments(): Promise<void> {
     ids
   );
 
-  for (const row of expired) {
+  if (expired.length > 0) {
     try {
-      await db.insert('tbl_sign_audit', {
-        id: crypto.randomUUID(),
-        documentId: row.id,
-        action: 'DOCUMENT_EXPIRED',
-        detail: 'Signing deadline passed',
-      });
+      const auditValues = expired.map((row: any) => [
+        crypto.randomUUID(),
+        row.id,
+        'DOCUMENT_EXPIRED',
+        'Signing deadline passed',
+      ]);
+      await db.insertAll(
+        `INSERT INTO tbl_sign_audit (id, documentId, action, detail) VALUES ?`,
+        [auditValues]
+      );
     } catch (err) {
-      logger.error({ err, documentId: row.id }, 'Maintenance: failed to write DOCUMENT_EXPIRED audit');
+      logger.error({ err }, 'Maintenance: failed to write DOCUMENT_EXPIRED audit');
     }
   }
 
@@ -151,12 +155,13 @@ async function purgeExpiredLetterPdfs(): Promise<void> {
     } catch (err) {
       logger.warn({ err, organizationId: org.id }, 'Letter retention: storage delete failed');
     }
-    for (const r of rows as any[]) {
+    const rowIds = (rows as any[]).map((r) => r.id as string);
+    if (rowIds.length > 0) {
       await db.execute(
-        `UPDATE tbl_letter_batch_employee SET pdfKey = NULL WHERE id = ?`,
-        [r.id]
+        `UPDATE tbl_letter_batch_employee SET pdfKey = NULL WHERE id IN (${rowIds.map(() => '?').join(',')})`,
+        rowIds
       );
-      purged += 1;
+      purged += rowIds.length;
     }
   }
   if (purged > 0) {

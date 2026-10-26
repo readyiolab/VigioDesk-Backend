@@ -118,6 +118,7 @@ export interface WebReportRepository {
   deleteOwned(id: string, userId: string): Promise<StoredReport | null>;
   getByShareToken(token: string): Promise<StoredReport | null>;
   loadChildren(id: string): Promise<{ checks: AuditCheck[]; perf: StoredPerf[] }>;
+  loadChildrenBatch(ids: string[]): Promise<Map<string, { checks: AuditCheck[]; perf: StoredPerf[] }>>;
 }
 
 function jsonText(value: unknown): string | null {
@@ -375,6 +376,69 @@ export const mysqlWebReportRepository: WebReportRepository = {
         fieldDataJson: jsonText(row.fieldData),
       })),
     };
+  },
+
+  async loadChildrenBatch(ids: string[]): Promise<Map<string, { checks: AuditCheck[]; perf: StoredPerf[] }>> {
+    const map = new Map<string, { checks: AuditCheck[]; perf: StoredPerf[] }>();
+    if (!ids.length) return map;
+    for (const id of ids) {
+      map.set(id, { checks: [], perf: [] });
+    }
+
+    const placeholders = ids.map(() => '?').join(',');
+    const [checks, perf] = await Promise.all([
+      db.queryAll<RowDataPacket>(
+        `SELECT reportId, category, checkId, status, severity, title, description, affectedCount, affectedUrls, fix, impact, effort
+           FROM tbl_webreport_check WHERE reportId IN (${placeholders}) ORDER BY checkId ASC`,
+        ids
+      ),
+      db.queryAll<RowDataPacket>(
+        `SELECT reportId, device, pageUrl, score, lcpMs, inpMs, cls, fcpMs, ttfbMs, tbtMs, bytes, opportunities, fieldData
+           FROM tbl_webreport_perf WHERE reportId IN (${placeholders}) ORDER BY device ASC, pageUrl ASC`,
+        ids
+      ),
+    ]);
+
+    for (const row of checks) {
+      const entry = map.get(String(row.reportId));
+      if (entry) {
+        entry.checks.push({
+          id: String(row.checkId),
+          category: row.category,
+          status: row.status,
+          severity: row.severity,
+          title: String(row.title),
+          description: String(row.description),
+          affectedCount: Number(row.affectedCount || 0),
+          affectedUrls: parseUrls(row.affectedUrls),
+          fix: String(row.fix),
+          impact: row.impact,
+          effort: row.effort,
+        });
+      }
+    }
+
+    for (const row of perf) {
+      const entry = map.get(String(row.reportId));
+      if (entry) {
+        entry.perf.push({
+          device: row.device,
+          pageUrl: row.pageUrl ? String(row.pageUrl) : null,
+          score: num(row.score),
+          lcpMs: num(row.lcpMs),
+          inpMs: num(row.inpMs),
+          cls: num(row.cls),
+          fcpMs: num(row.fcpMs),
+          ttfbMs: num(row.ttfbMs),
+          tbtMs: num(row.tbtMs),
+          bytes: num(row.bytes),
+          opportunitiesJson: jsonText(row.opportunities),
+          fieldDataJson: jsonText(row.fieldData),
+        });
+      }
+    }
+
+    return map;
   },
 };
 

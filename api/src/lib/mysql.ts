@@ -106,6 +106,7 @@ async function initializeDatabase(dbPool: Pool): Promise<void> {
 
     await ensureIndex(conn, 'tbl_job', 'idx_job_expiresAt', 'expiresAt');
     await ensureIndex(conn, 'tbl_job', 'idx_job_status', 'status');
+    await ensureIndex(conn, 'tbl_job', 'idx_job_status_created', 'status, createdAt');
     await ensureIndex(conn, 'tbl_job', 'idx_job_user_created', 'userId, createdAt');
     await ensureIndex(conn, 'tbl_subscription', 'idx_sub_razorpay', 'razorpaySubId');
     await ensureIndex(conn, 'tbl_cloud_integration', 'idx_cloud_user', 'userId');

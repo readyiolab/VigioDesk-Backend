@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { db } from '../lib/mysql';
+import { redis } from '../lib/redis';
 import { AppError } from './errorHandler.middleware';
 
 export type OrgRole = 'OWNER' | 'ADMIN' | 'HR_MANAGER' | 'VIEWER';
@@ -26,6 +27,17 @@ declare global {
   }
 }
 
+export async function invalidateOrgContext(userId: string, orgId?: string): Promise<void> {
+  try {
+    if (orgId) {
+      await redis.del(`org:ctx:${userId}:${orgId}`);
+    }
+    await redis.del(`org:ctx:${userId}:default`);
+  } catch {
+    // redis optional
+  }
+}
+
 /**
  * Resolves the caller's active org membership.
  * Organization id comes from (in order):
@@ -46,9 +58,19 @@ export async function resolveOrgContext(req: Request): Promise<OrgContext> {
     (req.params.orgId as string | undefined);
   const bodyOrg = typeof req.body?.organizationId === 'string' ? req.body.organizationId : undefined;
   const queryOrg =
-    typeof req.query?.organizationId === 'string' ? req.query.organizationId : undefined;
+    typeof req.query?.organizationId === 'string' ? req.query.queryOrgId || req.query.organizationId : undefined;
 
   const requestedOrgId = headerOrg || paramOrg || bodyOrg || queryOrg || null;
+  const cacheKey = `org:ctx:${req.user.id}:${requestedOrgId || 'default'}`;
+
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached) as OrgContext;
+    }
+  } catch {
+    // fallback to DB if redis down
+  }
 
   let membership: any;
   if (requestedOrgId) {
@@ -80,12 +102,20 @@ export async function resolveOrgContext(req: Request): Promise<OrgContext> {
     throw new AppError('Organization is not active', 403);
   }
 
-  return {
+  const result: OrgContext = {
     organizationId: membership.organizationId,
     role: membership.role as OrgRole,
     membershipId: membership.id,
     orgName: org.name,
   };
+
+  try {
+    await redis.set(cacheKey, JSON.stringify(result), 'EX', 300);
+  } catch {
+    // ignore cache write failures
+  }
+
+  return result;
 }
 
 /**

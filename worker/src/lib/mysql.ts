@@ -102,6 +102,13 @@ export class Database {
     );
   }
 
+  async insertAll(sql: string, params: any[] = []): Promise<ResultSetHeader> {
+    return withRetry(async () => {
+      const [result] = await this.getPool().query<ResultSetHeader>(sql, params);
+      return result;
+    }, 'INSERT_ALL');
+  }
+
   async close(): Promise<void> {
     if (!this.pool) return;
     await this.pool.end();

@@ -134,21 +134,34 @@ export const generateService = {
         [batchId]
       );
       if (!page.length) break;
+      const pageUpdates: { id: string; encPass: string | null }[] = [];
       for (const emp of page) {
         const data = parseJson<Record<string, string>>(emp.employeeDataJson, {});
         const password = resolvePassword(passwordMode, data);
-        await db.update(
-          'tbl_letter_batch_employee',
-          {
-            encryptedPdfPassword: password ? encryptSecret(password) : null,
-            pdfKey: null,
-            pdfFileName: null,
-            sendStatus: 'PENDING',
-          },
-          'id = ?',
-          [emp.id]
-        );
+        pageUpdates.push({
+          id: emp.id,
+          encPass: password ? encryptSecret(password) : null,
+        });
         ids.push(emp.id);
+      }
+
+      if (pageUpdates.length > 0) {
+        const caseClauses: string[] = [];
+        const params: any[] = [];
+        for (const u of pageUpdates) {
+          caseClauses.push('WHEN id = ? THEN ?');
+          params.push(u.id, u.encPass);
+        }
+        params.push(...pageUpdates.map((u) => u.id));
+        await db.execute(
+          `UPDATE tbl_letter_batch_employee
+            SET encryptedPdfPassword = CASE ${caseClauses.join(' ')} ELSE encryptedPdfPassword END,
+                pdfKey = NULL,
+                pdfFileName = NULL,
+                sendStatus = 'PENDING'
+            WHERE id IN (${pageUpdates.map(() => '?').join(',')})`,
+          params
+        );
       }
       offset += page.length;
       if (page.length < pageSize) break;
@@ -221,12 +234,14 @@ export const generateService = {
       throw new AppError('No failed letters to retry.', 400);
     }
 
-    for (const emp of employees) {
-      await db.update(
-        'tbl_letter_batch_employee',
-        { sendStatus: 'PENDING', pdfKey: null, pdfFileName: null },
-        'id = ?',
-        [emp.id]
+    const empIds = employees.map((emp) => emp.id);
+    for (let i = 0; i < empIds.length; i += 500) {
+      const chunk = empIds.slice(i, i + 500);
+      await db.execute(
+        `UPDATE tbl_letter_batch_employee
+         SET sendStatus = 'PENDING', pdfKey = NULL, pdfFileName = NULL
+         WHERE id IN (${chunk.map(() => '?').join(',')})`,
+        chunk
       );
     }
 

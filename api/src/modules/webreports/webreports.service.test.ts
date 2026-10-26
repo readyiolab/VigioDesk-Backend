@@ -79,6 +79,11 @@ function memoryRepo() {
     async loadChildren() {
       return { checks: [], perf: [] };
     },
+    async loadChildrenBatch(ids: string[]) {
+      const map = new Map();
+      for (const id of ids) map.set(id, { checks: [], perf: [] });
+      return map;
+    },
   };
   return { repo, rows, quota: () => quota };
 }

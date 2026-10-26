@@ -268,14 +268,24 @@ export async function purgeExpiredLetterPdfs(): Promise<{ purged: number }> {
         const uid = rows[0].createdBy;
         if (uid) {
           const { storage } = await getStorageForUser(uid);
+          const successfullyPurgedIds: string[] = [];
           for (const r of rows) {
             try {
               await storage.deleteObject(r.pdfKey);
             } catch {
               /* continue */
             }
-            await db.update('tbl_letter_batch_employee', { pdfKey: null }, 'id = ?', [r.id]);
-            purged += 1;
+            successfullyPurgedIds.push(r.id);
+          }
+          if (successfullyPurgedIds.length > 0) {
+            for (let i = 0; i < successfullyPurgedIds.length; i += 500) {
+              const chunk = successfullyPurgedIds.slice(i, i + 500);
+              await db.execute(
+                `UPDATE tbl_letter_batch_employee SET pdfKey = NULL WHERE id IN (${chunk.map(() => '?').join(',')})`,
+                chunk
+              );
+            }
+            purged += successfullyPurgedIds.length;
           }
         }
       } catch (err) {

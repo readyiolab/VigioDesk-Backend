@@ -172,8 +172,14 @@ export function createWebReportsService(deps: ServiceDeps) {
 
     async list(userId: string, limit: number, offset: number) {
       const page = await deps.repo.list(userId, limit, offset);
-      const reports = [];
-      for (const row of page.rows) reports.push(await present(deps.repo, row));
+      const idsToLoad = page.rows
+        .filter((r) => r.status !== 'queued' && r.status !== 'running')
+        .map((r) => r.id);
+      const batchMap = idsToLoad.length > 0 ? await deps.repo.loadChildrenBatch(idsToLoad) : new Map();
+      const reports = page.rows.map((row) => {
+        const children = batchMap.get(row.id) ?? { checks: [], perf: [] };
+        return toReportContract({ row: toRow(row), checks: children.checks, perf: children.perf });
+      });
       return { reports, pagination: { limit, offset, total: page.total } };
     },
 

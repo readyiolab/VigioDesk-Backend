@@ -78,10 +78,13 @@ function publicShare(row: any) {
   };
 }
 
-async function requireDiagram(organizationId: string, id: string) {
+async function requireDiagram(organizationId: string, id: string, includeContent = true) {
+  const fields = includeContent
+    ? '*'
+    : 'id, organizationId, folderId, title, currentVersion, createdBy, createdAt, updatedAt, thumbnailPngKey';
   const row = await db.select(
     'tbl_diagram',
-    '*',
+    fields,
     'id = ? AND organizationId = ?',
     [id, organizationId]
   );
@@ -190,7 +193,7 @@ export const diagramsService = {
     id: string,
     input: { title?: string; folderId?: string | null; content?: DiagramDocument }
   ) {
-    const row = await requireDiagram(organizationId, id);
+    const row = await requireDiagram(organizationId, id, false);
     const data: Record<string, unknown> = {};
 
     if (input.title !== undefined) data.title = input.title.trim() || row.title;
@@ -238,13 +241,13 @@ export const diagramsService = {
   },
 
   async remove(organizationId: string, id: string) {
-    await requireDiagram(organizationId, id);
+    await requireDiagram(organizationId, id, false);
     await db.delete('tbl_diagram', 'id = ? AND organizationId = ?', [id, organizationId]);
     return { ok: true };
   },
 
   async listVersions(organizationId: string, id: string) {
-    await requireDiagram(organizationId, id);
+    await requireDiagram(organizationId, id, false);
     const rows = await db.queryAll<any>(
       `SELECT id, version, createdBy, createdAt
          FROM tbl_diagram_version
@@ -265,7 +268,7 @@ export const diagramsService = {
     id: string,
     version: number
   ): Promise<DiagramDocument> {
-    await requireDiagram(organizationId, id);
+    await requireDiagram(organizationId, id, false);
     const snap = await db.select(
       'tbl_diagram_version',
       '*',
@@ -282,7 +285,7 @@ export const diagramsService = {
     id: string,
     version: number
   ) {
-    await requireDiagram(organizationId, id);
+    await requireDiagram(organizationId, id, false);
     const snap = await db.select(
       'tbl_diagram_version',
       '*',

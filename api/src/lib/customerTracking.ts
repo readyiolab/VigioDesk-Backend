@@ -152,35 +152,21 @@ export async function upsertContact(opts: {
   const email = opts.email.trim().toLowerCase();
   if (!email || !email.includes('@') || email.endsWith('@guest.local')) return null;
 
-  const existing = await db.select('tbl_contact', 'id, isRepeat', 'email = ?', [email]);
   const now = new Date();
-  if (existing) {
-    await db.update(
-      'tbl_contact',
-      {
-        lastSeenAt: now,
-        isRepeat: 1,
-        ...(opts.name ? { name: opts.name } : {}),
-        ...(opts.userId ? { userId: opts.userId } : {}),
-      },
-      'id = ?',
-      [existing.id]
-    );
-    return existing.id as string;
-  }
-
   const id = crypto.randomUUID();
-  await db.insert('tbl_contact', {
-    id,
-    email,
-    name: opts.name || null,
-    userId: opts.userId || null,
-    firstSeenAt: now,
-    lastSeenAt: now,
-    isRepeat: 0,
-    source: opts.source || null,
-  });
-  return id;
+  await db.execute(
+    `INSERT INTO tbl_contact (id, email, name, userId, firstSeenAt, lastSeenAt, isRepeat, source)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+     ON DUPLICATE KEY UPDATE
+       lastSeenAt = VALUES(lastSeenAt),
+       isRepeat = 1,
+       name = COALESCE(VALUES(name), name),
+       userId = COALESCE(VALUES(userId), userId)`,
+    [id, email, opts.name || null, opts.userId || null, now, now, opts.source || null]
+  );
+
+  const row = await db.select('tbl_contact', 'id', 'email = ?', [email]);
+  return (row?.id as string) ?? id;
 }
 
 /**

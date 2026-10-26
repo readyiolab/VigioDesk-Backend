@@ -63,8 +63,8 @@ export async function initializeDiagramSchema(conn: PoolConnection): Promise<voi
   `);
 
   await ensureIndex(conn, 'tbl_diagram', 'idx_diagram_org_updated', 'organizationId, updatedAt');
+  await ensureIndex(conn, 'tbl_diagram', 'idx_diagram_org_folder_updated', 'organizationId, folderId, updatedAt');
   await ensureIndex(conn, 'tbl_diagram', 'idx_diagram_folder', 'folderId');
   await ensureIndex(conn, 'tbl_diagram_folder', 'idx_diagram_folder_org', 'organizationId');
-  await ensureIndex(conn, 'tbl_diagram_version', 'idx_diagram_version_diagram', 'diagramId, version');
   await ensureIndex(conn, 'tbl_diagram_share', 'idx_diagram_share_diagram', 'diagramId');
 }
