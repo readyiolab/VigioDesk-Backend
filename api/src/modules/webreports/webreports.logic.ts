@@ -90,9 +90,11 @@ export function createWebReportsService(deps: ServiceDeps) {
 
   return {
     async create(userId: string, plan: 'FREE' | 'PRO' | 'ENTERPRISE', input: CreateInput) {
+      const rawUrl = (input.url || '').trim();
+      const targetUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
       let canonical;
       try {
-        canonical = await assertSafeTarget(input.url, deps.resolve);
+        canonical = await assertSafeTarget(targetUrl, deps.resolve);
       } catch (err) {
         throw clientError(err);
       }
