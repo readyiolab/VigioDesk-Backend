@@ -242,8 +242,8 @@ export function createWebReportsService(deps: ServiceDeps) {
       const existing = await deps.repo.getById(id);
       if (!existing || existing.userId !== userId) throw new AppError('Report not found', 404);
       const updated = await deps.repo.updateBranding(id, userId, {
-        customerCompanyName: input.companyName !== undefined ? input.companyName : existing.customerCompanyName,
-        customerLogoUrl: input.logoUrl !== undefined ? input.logoUrl : existing.customerLogoUrl,
+        companyName: input.companyName !== undefined ? input.companyName : existing.customerCompanyName,
+        logoUrl: input.logoUrl !== undefined ? input.logoUrl : existing.customerLogoUrl,
       });
       if (!updated) throw new AppError('Report not found', 404);
       return { report: await present(deps.repo, updated) };

@@ -175,11 +175,13 @@ function resolveBranding(row: ReportRow) {
       ? row.summaryHeadline
       : domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1));
 
+  const source: CustomerBranding['source'] = row.customerLogoUrl ? 'user_uploaded' : 'fallback';
+
   return {
     companyName,
     logoUrl: row.customerLogoUrl || `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
     domain,
-    source: (row.customerLogoUrl ? 'user_uploaded' : 'fallback') as const,
+    source,
   };
 }
 
