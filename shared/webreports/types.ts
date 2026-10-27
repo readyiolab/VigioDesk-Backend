@@ -111,6 +111,8 @@ export interface PageSnapshot {
   hasAboutLink: boolean;
   hasContactLink: boolean;
   consentGateLikely: boolean;
+  detectedLogo?: string | null;
+  detectedCompanyName?: string | null;
 }
 
 export interface CrawlSnapshot {
@@ -201,6 +203,13 @@ export interface ScoreBlock {
   aiSearch: number | null;
 }
 
+export interface CustomerBranding {
+  companyName: string | null;
+  logoUrl: string | null;
+  domain: string;
+  source: 'auto_detected' | 'user_uploaded' | 'fallback';
+}
+
 export interface ReportContract {
   contractVersion: number;
   id: string;
@@ -227,6 +236,7 @@ export interface ReportContract {
   shareToken: string | null;
   error: { message: string } | null;
   cached?: boolean;
+  customerBranding?: CustomerBranding;
 }
 
 /** Public responses are built only from these fields. */
@@ -247,4 +257,5 @@ export interface PublicReportContract {
   aiSearch: ReportContract['aiSearch'];
   topFixes: Recommendation[];
   error: { message: string } | null;
+  customerBranding?: CustomerBranding;
 }

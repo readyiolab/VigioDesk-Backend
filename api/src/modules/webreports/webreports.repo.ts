@@ -38,6 +38,9 @@ export interface StoredReport {
   scoringVersion: string;
   contractVersion: number;
   maxPages: number;
+  customerLogoUrl: string | null;
+  customerCompanyName: string | null;
+  customerBrandingJson: string | null;
 }
 
 function num(value: unknown): number | null {
@@ -86,6 +89,9 @@ export function mapReport(row: RowDataPacket): StoredReport {
     scoringVersion: String(row.scoringVersion),
     contractVersion: Number(row.contractVersion || 1),
     maxPages: Number(row.maxPages || 50),
+    customerLogoUrl: row.customerLogoUrl ? String(row.customerLogoUrl) : null,
+    customerCompanyName: row.customerCompanyName ? String(row.customerCompanyName) : null,
+    customerBrandingJson: row.customerBrandingJson ? String(row.customerBrandingJson) : null,
   };
 }
 
@@ -93,7 +99,7 @@ const COLUMNS = `id, userId, url, normalizedHost, normalizedUrl, urlHash, status
   overallScore, mobileScore, desktopScore, seoScore, aiScore, summaryHeadline, summaryText,
   shareToken, errorMessage, pagesCrawled, createdAt, startedAt, completedAt, jobGeneration,
   activeJobId, enqueuedAt, completenessJson, topFixesJson, detailJson, checkpointJson,
-  scoringVersion, contractVersion, maxPages`;
+  scoringVersion, contractVersion, maxPages, customerLogoUrl, customerCompanyName, customerBrandingJson`;
 
 export interface WebReportRepository {
   findCached(userId: string, urlHash: string, since: Date): Promise<StoredReport | null>;
@@ -118,6 +124,11 @@ export interface WebReportRepository {
   deleteOwned(id: string, userId: string): Promise<StoredReport | null>;
   getByShareToken(token: string): Promise<StoredReport | null>;
   loadChildren(id: string): Promise<{ checks: AuditCheck[]; perf: StoredPerf[] }>;
+  updateBranding(
+    id: string,
+    userId: string,
+    branding: { companyName?: string | null; logoUrl?: string | null }
+  ): Promise<StoredReport | null>;
   loadChildrenBatch(ids: string[]): Promise<Map<string, { checks: AuditCheck[]; perf: StoredPerf[] }>>;
 }
 
@@ -439,6 +450,41 @@ export const mysqlWebReportRepository: WebReportRepository = {
     }
 
     return map;
+  },
+
+  async updateBranding(
+    id: string,
+    userId: string,
+    branding: { companyName?: string | null; logoUrl?: string | null }
+  ): Promise<StoredReport | null> {
+    const existing = await this.getById(id);
+    if (!existing || existing.userId !== userId) return null;
+
+    let parsedBranding: Record<string, unknown> = {};
+    if (existing.customerBrandingJson) {
+      try {
+        parsedBranding = JSON.parse(existing.customerBrandingJson);
+      } catch {}
+    }
+
+    const updatedCompanyName = branding.companyName !== undefined ? branding.companyName : existing.customerCompanyName;
+    const updatedLogoUrl = branding.logoUrl !== undefined ? branding.logoUrl : existing.customerLogoUrl;
+
+    const mergedBranding = {
+      ...parsedBranding,
+      companyName: updatedCompanyName,
+      logoUrl: updatedLogoUrl,
+      source: 'user_uploaded',
+    };
+
+    await db.query(
+      `UPDATE tbl_webreport
+          SET customerLogoUrl = ?, customerCompanyName = ?, customerBrandingJson = ?
+        WHERE id = ? AND userId = ?`,
+      [updatedLogoUrl, updatedCompanyName, JSON.stringify(mergedBranding), id, userId]
+    );
+
+    return this.getById(id);
   },
 };
 

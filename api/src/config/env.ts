@@ -190,7 +190,7 @@ const envSchema = z.object({
   // for the answer, and a guard against a huge PDF blowing up cost.
   AI_MAX_TEXT_CHARS: z.coerce.number().default(400_000),
 
-  // Readyio WebReports. Optional keys must not prevent boot.
+  // Zuvigo WebReports. Optional keys must not prevent boot.
   PSI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   WEBREPORTS_MAX_PAGES: z.coerce.number().int().min(1).max(200).default(50),

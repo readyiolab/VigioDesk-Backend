@@ -40,3 +40,12 @@ export const shareTokenSchema = z.object({
   query: z.object({}).optional().default({}),
   params: z.object({ token: z.string().regex(/^[a-f0-9]{64}$/) }),
 });
+
+export const updateBrandingSchema = z.object({
+  body: z.object({
+    companyName: z.string().trim().max(200).nullable().optional(),
+    logoUrl: z.string().trim().url().max(2048).nullable().optional(),
+  }),
+  query: z.object({}).optional().default({}),
+  params: z.object({ id: uuid }),
+});

@@ -60,5 +60,5 @@ export function evaluateBotAccess(
 export function isAllowedByRobots(body: string | null, origin: string, url: string): boolean {
   if (!body) return true;
   const parser = robotsParser(`${origin}/robots.txt`, body);
-  return parser.isAllowed(url, 'ReadyioBot') !== false;
+  return parser.isAllowed(url, 'ZuvigoBot') !== false;
 }

@@ -3,7 +3,7 @@ import { authMiddleware, requireFullAccount, requireVerifiedEmail } from '../../
 import { validate } from '../../middleware/validate.middleware';
 import { webreportsCreateLimiter, webreportsPollLimiter } from '../../middleware/rateLimit.middleware';
 import { webreportsController } from './webreports.controller';
-import { createWebReportSchema, listWebReportsSchema, reportIdSchema, rescanSchema } from './webreports.types';
+import { createWebReportSchema, listWebReportsSchema, reportIdSchema, rescanSchema, updateBrandingSchema } from './webreports.types';
 
 const router = Router();
 
@@ -13,6 +13,7 @@ router.post('/', webreportsCreateLimiter, validate(createWebReportSchema), webre
 router.get('/', validate(listWebReportsSchema), webreportsController.list);
 router.get('/:id', webreportsPollLimiter, validate(reportIdSchema), webreportsController.get);
 router.post('/:id/rescan', webreportsCreateLimiter, validate(rescanSchema), webreportsController.rescan);
+router.patch('/:id/branding', validate(updateBrandingSchema), webreportsController.updateBranding);
 router.post('/:id/share', validate(reportIdSchema), webreportsController.share);
 router.delete('/:id/share', validate(reportIdSchema), webreportsController.revoke);
 router.delete('/:id', validate(reportIdSchema), webreportsController.remove);

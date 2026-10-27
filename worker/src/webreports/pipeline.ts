@@ -142,6 +142,21 @@ export async function runPipeline(reportId: string, generation: number, jobId: s
       return;
     }
     if (!(await updateStage(reportId, jobId, generation, 'saving_results', progressFor('saving_results')))) return;
+    const firstPage = crawl.pages[0];
+    let domain = 'client-website.com';
+    try {
+      domain = new URL(crawl.startUrl).hostname.replace(/^www\./i, '');
+    } catch {}
+
+    const detectedLogo = firstPage?.detectedLogo || `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+    const detectedCompanyName = firstPage?.detectedCompanyName || domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1);
+    const customerBranding = {
+      companyName: detectedCompanyName,
+      logoUrl: detectedLogo,
+      domain,
+      source: firstPage?.detectedLogo ? 'auto_detected' : 'fallback',
+    };
+
     await saveCompleted({
       reportId,
       jobId,
@@ -157,6 +172,9 @@ export async function runPipeline(reportId: string, generation: number, jobId: s
       summaryHeadline: summary.headline,
       summaryText: summary.text,
       scoringVersion: SCORING_VERSION,
+      customerLogoUrl: detectedLogo,
+      customerCompanyName: detectedCompanyName,
+      customerBrandingJson: JSON.stringify(customerBranding),
     });
     logger.info({ reportId, jobId }, 'Web report completed');
   } catch (err) {

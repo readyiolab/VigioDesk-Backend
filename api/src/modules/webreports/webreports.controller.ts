@@ -54,6 +54,14 @@ export const webreportsController = {
     }
   },
 
+  async updateBranding(req: Request, res: Response, next: NextFunction) {
+    try {
+      res.status(200).json(await webreportsService.updateBranding(req.user.id, req.params.id, req.body));
+    } catch (err) {
+      next(err);
+    }
+  },
+
   async remove(req: Request, res: Response, next: NextFunction) {
     try {
       res.status(200).json(await webreportsService.remove(req.user.id, req.params.id));

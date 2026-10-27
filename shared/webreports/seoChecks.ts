@@ -21,7 +21,7 @@ export function runSeoChecks(snapshot: CrawlSnapshot): AuditCheck[] {
         severity: 'info',
         title: 'SEO checks unavailable',
         description: 'No HTML pages were fetched, so on-page SEO checks could not run.',
-        fix: 'Confirm the URL returns HTML and can be reached by ReadyioBot.',
+        fix: 'Confirm the URL returns HTML and can be reached by ZuvigoBot.',
         impact: 'medium',
         effort: 'easy',
       }),

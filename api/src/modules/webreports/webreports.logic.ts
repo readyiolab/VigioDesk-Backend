@@ -148,6 +148,9 @@ export function createWebReportsService(deps: ServiceDeps) {
         scoringVersion: SCORING_VERSION,
         contractVersion: CONTRACT_VERSION,
         maxPages,
+        customerLogoUrl: null,
+        customerCompanyName: null,
+        customerBrandingJson: null,
       };
       const windowCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       const inserted = await deps.repo.insertReserved({
@@ -229,6 +232,21 @@ export function createWebReportsService(deps: ServiceDeps) {
       if (!existing || existing.userId !== userId) throw new AppError('Report not found', 404);
       await deps.repo.setShareToken(id, userId, null);
       return { ok: true };
+    },
+
+    async updateBranding(
+      userId: string,
+      id: string,
+      input: { companyName?: string | null; logoUrl?: string | null }
+    ) {
+      const existing = await deps.repo.getById(id);
+      if (!existing || existing.userId !== userId) throw new AppError('Report not found', 404);
+      const updated = await deps.repo.updateBranding(id, userId, {
+        customerCompanyName: input.companyName !== undefined ? input.companyName : existing.customerCompanyName,
+        customerLogoUrl: input.logoUrl !== undefined ? input.logoUrl : existing.customerLogoUrl,
+      });
+      if (!updated) throw new AppError('Report not found', 404);
+      return { report: await present(deps.repo, updated) };
     },
 
     async remove(userId: string, id: string) {

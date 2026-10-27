@@ -252,7 +252,7 @@ export function defaultPinnedRequest(input: {
         path: `${input.url.pathname}${input.url.search}`,
         method: 'GET',
         headers: {
-          'User-Agent': 'ReadyioBot',
+          'User-Agent': 'ZuvigoBot/1.0 (+https://zuvigo.com/bot)',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           Host: input.url.host,
         },

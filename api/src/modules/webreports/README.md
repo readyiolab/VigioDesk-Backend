@@ -1,4 +1,4 @@
-# Readyio WebReports
+# Zuvigo WebReports
 
 Website audits for signed-in, verified accounts. The API validates the URL, stores a queued report, and enqueues a BullMQ job. A separate worker crawls the site, runs SEO and AI-search checks, measures mobile and desktop performance, scores the result, and writes it back. The React app polls the report until it finishes.
 
@@ -105,7 +105,7 @@ At most six recommendations are stored, ranked by impact, severity and scope, th
 
 ## SSRF
 
-Only `http:` and `https:` are allowed. Userinfo, unsupported numeric hosts, loopback, private, link-local, multicast, reserved, unspecified, CGNAT, IPv4-mapped IPv6, and cloud metadata hosts are rejected. Every A and AAAA answer is checked. Node fetch pins DNS `lookup` to a validated address and sets TLS `servername` to the original hostname. Each redirect is revalidated, with a maximum of five. The client sends `User-Agent: ReadyioBot` and does not forward cookies or authorization.
+Only `http:` and `https:` are allowed. Userinfo, unsupported numeric hosts, loopback, private, link-local, multicast, reserved, unspecified, CGNAT, IPv4-mapped IPv6, and cloud metadata hosts are rejected. Every A and AAAA answer is checked. Node fetch pins DNS `lookup` to a validated address and sets TLS `servername` to the original hostname. Each redirect is revalidated, with a maximum of five. The client sends `User-Agent: ZuvigoBot/1.0 (+https://zuvigo.com/bot)` and does not forward cookies or authorization.
 
 Chromium is launched with `--proxy-server` pointed at an in-process proxy. That proxy connects only to a validated address. Puppeteer request interception is a second blocklist. Interception alone is not sufficient.
 
@@ -121,7 +121,7 @@ ufw deny out to 100.64.0.0/10
 
 This repository does not apply those rules.
 
-Crawl scope is the same scheme, host, and effective port. `robots.txt` is honored for ReadyioBot and recorded for GPTBot, ChatGPT-User, OAI-SearchBot, ClaudeBot, Claude-Web, PerplexityBot, Google-Extended, and CCBot. Sitemap recursion is depth 3 and at most 100 URLs. Timeouts are inconclusive, not broken links.
+Crawl scope is the same scheme, host, and effective port. `robots.txt` is honored for ZuvigoBot and recorded for GPTBot, ChatGPT-User, OAI-SearchBot, ClaudeBot, Claude-Web, PerplexityBot, Google-Extended, and CCBot. Sitemap recursion is depth 3 and at most 100 URLs. Timeouts are inconclusive, not broken links.
 
 ## Frontend
 

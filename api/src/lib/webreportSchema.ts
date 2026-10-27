@@ -10,6 +10,10 @@ export async function initializeWebReportSchema(conn: PoolConnection): Promise<v
     'DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)'
   );
 
+  await ensureColumn(conn, 'tbl_webreport', 'customerLogoUrl', 'VARCHAR(1024) NULL');
+  await ensureColumn(conn, 'tbl_webreport', 'customerCompanyName', 'VARCHAR(255) NULL');
+  await ensureColumn(conn, 'tbl_webreport', 'customerBrandingJson', 'JSON NULL');
+
   await conn.query(`
     CREATE TABLE IF NOT EXISTS tbl_webreport (
       id VARCHAR(255) PRIMARY KEY,
@@ -44,6 +48,9 @@ export async function initializeWebReportSchema(conn: PoolConnection): Promise<v
       scoringVersion VARCHAR(64) NOT NULL,
       contractVersion INT NOT NULL DEFAULT 1,
       maxPages INT NOT NULL DEFAULT 50,
+      customerLogoUrl VARCHAR(1024) NULL,
+      customerCompanyName VARCHAR(255) NULL,
+      customerBrandingJson JSON NULL,
       UNIQUE KEY uq_webreport_share (shareToken),
       INDEX idx_webreport_user_created (userId, createdAt),
       INDEX idx_webreport_cache (userId, urlHash, createdAt),

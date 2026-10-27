@@ -41,8 +41,8 @@ describe('robots evaluation', () => {
     assert.equal(evaluateBotAccess(null, 'unavailable', 'https://example.com', ['https://example.com/']).access.CCBot, 'unavailable');
   });
 
-  it('applies ReadyioBot rules separately from AI bots', () => {
-    const rules = `User-agent: ReadyioBot\nDisallow: /secret\n\nUser-agent: *\nAllow: /\n`;
+  it('applies ZuvigoBot rules separately from AI bots', () => {
+    const rules = `User-agent: ZuvigoBot\nDisallow: /secret\n\nUser-agent: *\nAllow: /\n`;
     assert.equal(isAllowedByRobots(rules, 'https://example.com', 'https://example.com/secret'), false);
     assert.equal(isAllowedByRobots(rules, 'https://example.com', 'https://example.com/'), true);
   });

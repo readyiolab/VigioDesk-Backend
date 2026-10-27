@@ -76,6 +76,9 @@ export async function saveCompleted(input: {
   summaryHeadline: string;
   summaryText: string;
   scoringVersion: string;
+  customerLogoUrl?: string | null;
+  customerCompanyName?: string | null;
+  customerBrandingJson?: string | null;
 }): Promise<boolean> {
   const conn = await pool.getConnection();
   try {
@@ -102,6 +105,9 @@ export async function saveCompleted(input: {
               overallScore = ?, mobileScore = ?, desktopScore = ?, seoScore = ?, aiScore = ?,
               summaryHeadline = ?, summaryText = ?, pagesCrawled = ?,
               completenessJson = ?, topFixesJson = ?, detailJson = ?, scoringVersion = ?,
+              customerLogoUrl = COALESCE(?, customerLogoUrl),
+              customerCompanyName = COALESCE(?, customerCompanyName),
+              customerBrandingJson = COALESCE(?, customerBrandingJson),
               completedAt = CURRENT_TIMESTAMP(3), errorMessage = NULL
         WHERE id = ? AND activeJobId = ?`,
       [
@@ -117,6 +123,9 @@ export async function saveCompleted(input: {
         JSON.stringify(input.topFixes),
         JSON.stringify(input.detail),
         input.scoringVersion,
+        input.customerLogoUrl || null,
+        input.customerCompanyName || null,
+        input.customerBrandingJson || null,
         input.reportId,
         input.jobId,
       ]

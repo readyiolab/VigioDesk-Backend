@@ -33,6 +33,9 @@ export interface ReportRow {
   scoringVersion: string;
   contractVersion: number;
   detailJson: string | null;
+  customerLogoUrl?: string | null;
+  customerCompanyName?: string | null;
+  customerBrandingJson?: string | null;
 }
 
 export interface ReportDetail {
@@ -152,6 +155,31 @@ export function toReportContract(input: {
       input.row.status === 'failed'
         ? { message: input.row.errorMessage || 'The scan could not be completed.' }
         : null,
+    customerBranding: resolveBranding(input.row),
+  };
+}
+
+function resolveBranding(row: ReportRow) {
+  if (row.customerBrandingJson) {
+    const parsed = parseJson(row.customerBrandingJson, null);
+    if (parsed) return parsed;
+  }
+  let domain = 'client-website.com';
+  try {
+    domain = new URL(row.url).hostname.replace(/^www\./i, '');
+  } catch {}
+
+  const companyName =
+    row.customerCompanyName ||
+    (row.summaryHeadline && row.summaryHeadline.length < 35 && !/ready|audit|scan/i.test(row.summaryHeadline)
+      ? row.summaryHeadline
+      : domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1));
+
+  return {
+    companyName,
+    logoUrl: row.customerLogoUrl || `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
+    domain,
+    source: (row.customerLogoUrl ? 'user_uploaded' : 'fallback') as const,
   };
 }
 
@@ -175,5 +203,6 @@ export function toPublicReport(report: ReportContract): PublicReportContract {
     aiSearch: report.aiSearch,
     topFixes: report.topFixes,
     error: report.status === 'failed' ? { message: PUBLIC_ERROR } : null,
+    customerBranding: report.customerBranding,
   };
 }

@@ -56,6 +56,55 @@ export function parseHtml(html: string, pageUrl: string): Parsed {
   const modified = $('meta[property="article:modified_time"]').attr('content') || null;
   const hrefs = links.map((href) => href.toLowerCase());
 
+  let detectedLogo: string | null = null;
+  let detectedCompanyName: string | null = $('meta[property="og:site_name"]').attr('content')?.trim() || null;
+
+  $('script[type="application/ld+json"]').each((_, el) => {
+    try {
+      const raw = $(el).text();
+      const parsed = JSON.parse(raw);
+      const walk = (item: unknown): void => {
+        if (!item || typeof item !== 'object') return;
+        if (Array.isArray(item)) {
+          item.forEach(walk);
+          return;
+        }
+        const record = item as Record<string, unknown>;
+        const type = String(record['@type'] || '');
+        if (/Organization|Corporation|LocalBusiness|Brand|WebSite/i.test(type)) {
+          if (!detectedCompanyName && typeof record.name === 'string') {
+            detectedCompanyName = record.name.trim();
+          }
+          if (!detectedLogo) {
+            if (typeof record.logo === 'string') detectedLogo = record.logo;
+            else if (record.logo && typeof (record.logo as Record<string, unknown>).url === 'string') {
+              detectedLogo = (record.logo as Record<string, unknown>).url as string;
+            } else if (typeof record.image === 'string') {
+              detectedLogo = record.image;
+            }
+          }
+        }
+        if (record['@graph']) walk(record['@graph']);
+      };
+      walk(parsed);
+    } catch {}
+  });
+
+  if (!detectedLogo) {
+    const appleIcon = $('link[rel="apple-touch-icon"], link[rel="apple-touch-icon-precomposed"]').attr('href');
+    const highResIcon = $('link[rel="icon"][sizes="192x192"], link[rel="icon"][sizes="512x512"]').attr('href');
+    const headerLogo = $('header img[src*="logo" i], nav img[src*="logo" i], a[class*="brand" i] img, a[class*="logo" i] img, img[alt*="logo" i]').first().attr('src');
+    const ogImg = $('meta[property="og:image"]').attr('content');
+    const candidate = appleIcon || highResIcon || headerLogo || ogImg;
+    if (candidate) {
+      try {
+        detectedLogo = new URL(candidate, pageUrl).href;
+      } catch {
+        detectedLogo = candidate;
+      }
+    }
+  }
+
   return {
     title: $('title').first().text().replace(/\s+/g, ' ').trim().slice(0, 500) || null,
     metaDescription: ($('meta[name="description"]').attr('content') || '').trim().slice(0, 500) || null,
@@ -91,8 +140,9 @@ export function parseHtml(html: string, pageUrl: string): Parsed {
     hasContactLink: hrefs.some((href) => /\/contact\b/.test(href)),
     consentGateLikely: /cookie consent|consent manager|privacy preference/i.test(html),
     links,
+    detectedLogo,
+    detectedCompanyName,
   };
-  void pageUrl;
 }
 
 function collectSchema(value: unknown, types: string[]): void {
