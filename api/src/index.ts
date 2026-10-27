@@ -51,8 +51,8 @@ app.use(
       if (!origin || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-      // Allow any zuvigo.com subdomain in production & staging
-      if (/^https?:\/\/([a-z0-9-]+\.)?zuvigo\.com(:\d+)?$/i.test(origin)) {
+      // Allow any zuvigo.com or vigodesk.com domain/subdomain in production & staging
+      if (/^https?:\/\/([a-z0-9-]+\.)?(zuvigo\.com|vigodesk\.com)(:\d+)?$/i.test(origin)) {
         return callback(null, true);
       }
       // Allow localhost in development
