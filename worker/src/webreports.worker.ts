@@ -25,14 +25,27 @@ const worker = new Worker(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), env.WEBREPORTS_SCAN_TIMEOUT_MS);
     controllers.set(job.id || '', controller);
+
+    // Keep-alive heartbeat every 10s to ensure BullMQ never considers long Lighthouse/crawls stalled
+    const heartbeat = setInterval(() => {
+      job.updateProgress(Date.now()).catch(() => undefined);
+    }, 10_000);
+
     try {
       await runPipeline(job.data.reportId, job.data.generation, job.id || '', controller.signal);
     } finally {
+      clearInterval(heartbeat);
       clearTimeout(timer);
       controllers.delete(job.id || '');
     }
   },
-  { connection: redis as any, concurrency: env.WEBREPORTS_CONCURRENCY }
+  {
+    connection: redis as any,
+    concurrency: env.WEBREPORTS_CONCURRENCY,
+    lockDuration: 300_000, // 5 minutes lock so CPU intensive Lighthouse runs never lose lock
+    stalledInterval: 60_000,
+    maxStalledCount: 3,
+  }
 );
 
 worker.on('failed', (job, err) => {

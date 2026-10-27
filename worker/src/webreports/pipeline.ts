@@ -79,7 +79,7 @@ export async function runPipeline(reportId: string, generation: number, jobId: s
 
     let mobile = checkpoint.mobile || emptyDevice('Mobile lab data is unavailable.');
     let desktop = checkpoint.desktop || emptyDevice('Desktop lab data is unavailable.');
-    const perfUrls = pickKeyPages(crawl.pages, crawl.startUrl, 5);
+    const perfUrls = pickKeyPages(crawl.pages, crawl.startUrl, 2);
     if (!checkpoint.mobile) {
       if (!(await updateStage(reportId, jobId, generation, 'testing_mobile', progressFor('testing_mobile')))) return;
       if (!signal.aborted) mobile = await runDeviceSet(browser, perfUrls, 'mobile', env.WEBREPORTS_LIGHTHOUSE_CONCURRENCY, signal);
