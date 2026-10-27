@@ -38,8 +38,21 @@ const sockets = new Set<{ destroy(): void }>();
       });
   });
 
+  server.on('clientError', (_err, socket) => {
+    socket.destroy();
+  });
+
+  server.on('error', () => {
+    // Suppress unhandled server listen errors
+  });
+
   server.on('connect', (req, clientSocket, head) => {
     sockets.add(clientSocket);
+    clientSocket.on('error', () => {
+      sockets.delete(clientSocket);
+      clientSocket.destroy();
+    });
+
     authorizeProxyTarget(req.url || '', resolve)
       .then((decision) => {
         const upstream = net.connect(decision.port, decision.address, () => {
@@ -49,12 +62,19 @@ const sockets = new Set<{ destroy(): void }>();
           upstream.pipe(clientSocket);
           clientSocket.pipe(upstream);
         });
-        upstream.on('error', () => clientSocket.destroy());
+        upstream.on('error', () => {
+          sockets.delete(upstream);
+          clientSocket.destroy();
+        });
         upstream.on('close', () => sockets.delete(upstream));
       })
       .catch((err: unknown) => {
         const message = err instanceof UrlSafetyError ? 'blocked' : 'blocked';
-        clientSocket.write(`HTTP/1.1 403 ${message}\r\n\r\n`);
+        try {
+          clientSocket.write(`HTTP/1.1 403 ${message}\r\n\r\n`);
+        } catch {
+          // Socket might already be closed
+        }
         clientSocket.destroy();
       });
     clientSocket.on('close', () => sockets.delete(clientSocket));

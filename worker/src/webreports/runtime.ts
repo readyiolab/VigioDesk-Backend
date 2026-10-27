@@ -11,7 +11,22 @@ export const logger = pino({
       : undefined,
 });
 
-export const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
+export const redis = new Redis(env.REDIS_URL, {
+  maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+  keepAlive: 10000,
+  retryStrategy(times) {
+    return Math.min(times * 150, 3000);
+  },
+});
+
+redis.on('connect', () => {
+  logger.info('Web reports worker connected to Redis');
+});
+
+redis.on('error', (err) => {
+  logger.error({ err }, 'Web reports worker Redis connection error');
+});
 
 export const pool = mysql.createPool({
   host: env.DB_HOST,

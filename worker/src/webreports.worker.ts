@@ -48,6 +48,14 @@ const worker = new Worker(
   }
 );
 
+worker.on('error', (err) => {
+  logger.error({ err }, 'Web report BullMQ worker error');
+});
+
+queue.on('error', (err) => {
+  logger.error({ err }, 'Web report BullMQ queue error');
+});
+
 worker.on('failed', (job, err) => {
   logger.error({ err, reportId: job?.data?.reportId, jobId: job?.id }, 'Web report job failed');
   if (!job) return;
@@ -137,3 +145,12 @@ process.on('unhandledRejection', (err) => {
   logger.fatal({ err }, 'Unhandled rejection in web reports worker');
   process.exit(1);
 });
+process.on('uncaughtException', (err: any) => {
+  if (err?.code === 'ECONNRESET' || err?.code === 'EPIPE' || err?.code === 'ETIMEDOUT') {
+    logger.warn({ err }, 'Transient socket network error caught in uncaughtException');
+    return;
+  }
+  logger.fatal({ err }, 'Uncaught exception in web reports worker');
+  process.exit(1);
+});
+

@@ -284,6 +284,7 @@ export function defaultPinnedRequest(input: {
             address: input.address,
           });
         });
+        res.on('error', fail);
       }
     );
     const fail = (err: Error) => {
