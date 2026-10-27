@@ -13,6 +13,10 @@ const mobileSettings = {
     formFactor: 'mobile' as const,
     screenEmulation: { mobile: true, width: 412, height: 823, deviceScaleFactor: 1.75, disabled: false },
     throttlingMethod: 'simulate' as const,
+    maxWaitForLoaded: 20_000,
+    maxWaitForFcp: 12_000,
+    pauseAfterLoadMs: 500,
+    networkQuietThresholdMs: 1000,
     throttling: {
       rttMs: 150,
       throughputKbps: 1638.4,
@@ -31,6 +35,10 @@ const desktopSettings = {
     formFactor: 'desktop' as const,
     screenEmulation: { mobile: false, width: 1350, height: 940, deviceScaleFactor: 1, disabled: false },
     throttlingMethod: 'simulate' as const,
+    maxWaitForLoaded: 20_000,
+    maxWaitForFcp: 12_000,
+    pauseAfterLoadMs: 500,
+    networkQuietThresholdMs: 1000,
     throttling: {
       rttMs: 40,
       throughputKbps: 10240,
@@ -114,16 +122,28 @@ export async function runLighthouse(
     const port = Number(endpoint.port);
     if (!port) return metricsFromLighthouse(null, url);
     try {
-      const runner = await lighthouse(url, {
-        port,
-        hostname: endpoint.hostname,
-        output: 'json',
-        logLevel: 'error',
-        onlyCategories: ['performance'],
-      }, device === 'mobile' ? mobileSettings : desktopSettings);
+      const runnerPromise = lighthouse(
+        url,
+        {
+          port,
+          hostname: endpoint.hostname,
+          output: 'json',
+          logLevel: 'error',
+          onlyCategories: ['performance'],
+        },
+        device === 'mobile' ? mobileSettings : desktopSettings
+      );
+
+      let timer: NodeJS.Timeout | null = null;
+      const timeoutPromise = new Promise<null>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Lighthouse execution timed out after 35s')), 35_000);
+      });
+
+      const runner = await Promise.race([runnerPromise, timeoutPromise]);
+      if (timer) clearTimeout(timer);
       return metricsFromLighthouse(runner?.lhr || null, url);
     } catch (err) {
-      logger.warn({ err, url, device }, 'Lighthouse failed');
+      logger.warn({ err, url, device }, 'Lighthouse failed or timed out');
       return metricsFromLighthouse(null, url);
     }
   });
