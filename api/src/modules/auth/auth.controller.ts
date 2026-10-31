@@ -111,6 +111,15 @@ export const authController = {
     }
   },
 
+  async microsoft(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await authService.microsoftAuth(req.body);
+      issueSession(res, result);
+    } catch (err) {
+      next(err);
+    }
+  },
+
   async verifyEmail(req: Request, res: Response, next: NextFunction) {
     try {
       const result = await authService.verifyEmail(req.body.token);

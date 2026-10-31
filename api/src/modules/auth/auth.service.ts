@@ -9,8 +9,143 @@ import { isMailerConfigured, sendMail } from '../../lib/mailer';
 import { logger } from '../../lib/logger';
 import { invalidateUser } from '../../lib/userCache';
 import { isGoogleAuthConfigured, verifyGoogleIdToken } from '../../lib/googleAuth';
+import { isMicrosoftAuthConfigured, verifyMicrosoftIdToken } from '../../lib/microsoftAuth';
 import { stitchUserAttribution } from '../../lib/customerTracking';
 import type { AttributionPayload } from '../../lib/customerTracking';
+
+type SocialProvider = 'google' | 'microsoft';
+
+const SOCIAL_USER_COLUMNS =
+  'id, email, name, plan, emailVerified, authProvider, googleSub, microsoftSub';
+
+/**
+ * Find-or-create for Google / Microsoft ID-token login.
+ * Lookup: provider subject first, then verified email. Password accounts keep
+ * authProvider=password so email/password login still works after linking.
+ */
+async function linkOrCreateSocialUser(input: {
+  provider: SocialProvider;
+  sub: string;
+  email: string;
+  name: string | null;
+  attribution?: AttributionPayload;
+}): Promise<AuthResponse> {
+  const { provider, sub, email: normalizedEmail, name, attribution } = input;
+  const subColumn = provider === 'google' ? 'googleSub' : 'microsoftSub';
+  const passwordPlaceholder = provider === 'google' ? '!google' : '!microsoft';
+  const userName = name || normalizedEmail.split('@')[0];
+
+  let user: any = await db.select('tbl_user', SOCIAL_USER_COLUMNS, `${subColumn} = ?`, [sub]);
+
+  let isNew = false;
+
+  if (user) {
+    const updates: Record<string, unknown> = {
+      emailVerified: 1,
+      emailVerifyToken: null,
+      emailVerifyExpiresAt: null,
+    };
+
+    if (user.email !== normalizedEmail) {
+      const emailTaken = await db.select('tbl_user', 'id', 'email = ? AND id <> ?', [
+        normalizedEmail,
+        user.id,
+      ]);
+      if (!emailTaken) {
+        updates.email = normalizedEmail;
+        user.email = normalizedEmail;
+      }
+    }
+
+    if (name && (!user.name || user.name === String(user.email).split('@')[0])) {
+      updates.name = name;
+      user.name = name;
+    }
+
+    await db.update('tbl_user', updates, 'id = ?', [user.id]);
+    await invalidateUser(user.id).catch(() => undefined);
+    user.emailVerified = 1;
+    logger.info({ userId: user.id, email: user.email, provider }, `Signed in via ${provider}`);
+  } else {
+    user = await db.select('tbl_user', SOCIAL_USER_COLUMNS, 'email = ?', [normalizedEmail]);
+
+    if (user) {
+      const existingSub = user[subColumn] as string | null | undefined;
+      if (existingSub && existingSub !== sub) {
+        throw new AppError(
+          `This email is already linked to a different ${provider} account`,
+          409
+        );
+      }
+
+      const updates: Record<string, unknown> = {
+        [subColumn]: sub,
+        emailVerified: 1,
+        emailVerifyToken: null,
+        emailVerifyExpiresAt: null,
+      };
+
+      if (name && (!user.name || user.name === normalizedEmail.split('@')[0])) {
+        updates.name = name;
+        user.name = name;
+      }
+
+      // Keep 'password' if they registered with email first; otherwise mark provider.
+      if (user.authProvider !== 'password') {
+        updates.authProvider = provider;
+        user.authProvider = provider;
+      }
+
+      await db.update('tbl_user', updates, 'id = ?', [user.id]);
+      await invalidateUser(user.id).catch(() => undefined);
+      user.emailVerified = 1;
+      user[subColumn] = sub;
+      logger.info(
+        { userId: user.id, email: normalizedEmail, provider },
+        `Linked ${provider} subject and signed in`
+      );
+    } else {
+      isNew = true;
+      const userId = crypto.randomUUID();
+      await db.insert('tbl_user', {
+        id: userId,
+        email: normalizedEmail,
+        passwordHash: passwordPlaceholder,
+        name: userName,
+        plan: 'FREE',
+        emailVerified: 1,
+        authProvider: provider,
+        [subColumn]: sub,
+      });
+
+      user = {
+        id: userId,
+        email: normalizedEmail,
+        name: userName,
+        plan: 'FREE',
+        emailVerified: 1,
+        authProvider: provider,
+        [subColumn]: sub,
+      };
+      logger.info({ userId, email: normalizedEmail, provider }, `Created user via ${provider} sign-in`);
+    }
+  }
+
+  void stitchUserAttribution({
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+    attribution,
+    eventType: isNew ? 'signup' : 'login',
+  });
+
+  const token = signToken({ userId: user.id, email: user.email, plan: user.plan });
+
+  return {
+    token,
+    user: toAuthUser({ ...user, emailVerified: 1 }),
+  };
+}
 
 const VERIFY_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_LOGIN_ATTEMPTS = 5;
@@ -151,12 +286,13 @@ export const authService = {
       throw new AppError('Account temporarily locked. Try again later.', 429);
     }
 
-    // Guest / Google accounts are not password-loginable (no expensive bcrypt).
+    // Guest / social accounts are not password-loginable (no expensive bcrypt).
     if (
       !user.passwordHash ||
       !String(user.passwordHash).startsWith('$2') ||
       user.authProvider === 'guest' ||
-      user.authProvider === 'google'
+      user.authProvider === 'google' ||
+      user.authProvider === 'microsoft'
     ) {
       throw new AppError('Invalid email or password', 401);
     }
@@ -253,76 +389,37 @@ export const authService = {
     }
 
     const identity = await verifyGoogleIdToken(input.credential);
-    const normalizedEmail = identity.email;
-    const userName = identity.name || normalizedEmail.split('@')[0];
+    return linkOrCreateSocialUser({
+      provider: 'google',
+      sub: identity.sub,
+      email: identity.email,
+      name: identity.name,
+      attribution: input.attribution,
+    });
+  },
 
-    let user: any = await db.select(
-      'tbl_user',
-      'id, email, name, plan, emailVerified, authProvider',
-      'email = ?',
-      [normalizedEmail]
-    );
-
-    let isNew = false;
-    if (!user) {
-      isNew = true;
-      const userId = crypto.randomUUID();
-      await db.insert('tbl_user', {
-        id: userId,
-        email: normalizedEmail,
-        // Unusable — Google accounts sign in via ID token, not password.
-        passwordHash: '!google',
-        name: userName,
-        plan: 'FREE',
-        emailVerified: 1,
-        authProvider: 'google',
-      });
-
-      user = {
-        id: userId,
-        email: normalizedEmail,
-        name: userName,
-        plan: 'FREE',
-        emailVerified: 1,
-        authProvider: 'google',
-      };
-      logger.info({ userId, email: normalizedEmail }, 'Created user via Google sign-in');
-    } else {
-      // Existing account (password or google): trust Google's verified email.
-      const updates: Record<string, unknown> = {
-        emailVerified: 1,
-        emailVerifyToken: null,
-        emailVerifyExpiresAt: null,
-      };
-      // Prefer a real display name from Google if we only had a placeholder.
-      if (identity.name && (!user.name || user.name === normalizedEmail.split('@')[0])) {
-        updates.name = identity.name;
-        user.name = identity.name;
-      }
-      // Keep 'password' if they registered with email first; otherwise mark google.
-      if (user.authProvider !== 'password') {
-        updates.authProvider = 'google';
-      }
-      await db.update('tbl_user', updates, 'id = ?', [user.id]);
-      await invalidateUser(user.id).catch(() => undefined);
-      user.emailVerified = 1;
-      logger.info({ userId: user.id, email: normalizedEmail }, 'Signed in via Google');
+  /**
+   * Authenticates or registers a user via a verified Microsoft Entra ID token.
+   */
+  async microsoftAuth(input: {
+    credential?: string;
+    attribution?: AttributionPayload;
+  }): Promise<AuthResponse> {
+    if (!isMicrosoftAuthConfigured()) {
+      throw new AppError('Microsoft sign-in is not configured on this server', 503);
+    }
+    if (!input.credential) {
+      throw new AppError('Microsoft authentication failed: credential is required', 400);
     }
 
-    void stitchUserAttribution({
-      userId: user.id,
-      email: user.email,
-      name: user.name,
+    const identity = await verifyMicrosoftIdToken(input.credential);
+    return linkOrCreateSocialUser({
+      provider: 'microsoft',
+      sub: identity.sub,
+      email: identity.email,
+      name: identity.name,
       attribution: input.attribution,
-      eventType: isNew ? 'signup' : 'login',
     });
-
-    const token = signToken({ userId: user.id, email: user.email, plan: user.plan });
-
-    return {
-      token,
-      user: toAuthUser({ ...user, emailVerified: 1 }),
-    };
   },
 
   async verifyEmail(rawToken: string): Promise<AuthResponse> {

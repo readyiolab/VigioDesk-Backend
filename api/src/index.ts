@@ -19,6 +19,7 @@ import { createDashboard } from './lib/bullBoard';
 import { createMysqlPool } from './lib/mysql';
 import { isMailerConfigured } from './lib/mailer';
 import { isGoogleAuthConfigured } from './lib/googleAuth';
+import { isMicrosoftAuthConfigured } from './lib/microsoftAuth';
 import { startSignFinalizeWorker, stopSignFinalizeWorker } from './lib/signFinalizeWorker';
 import { startLetterWorkers, stopLetterWorkers } from './lib/letterWorkers';
 import { startStorageCacheInvalidationSubscriber, startByocHealthAlertSubscriber } from './lib/storage';
@@ -212,6 +213,11 @@ async function bootstrap() {
         logger.info('🔐 Google sign-in configured (GOOGLE_CLIENT_ID set)');
       } else {
         logger.warn('🔐 Google sign-in NOT configured — set GOOGLE_CLIENT_ID and restart.');
+      }
+      if (isMicrosoftAuthConfigured()) {
+        logger.info('🔐 Microsoft sign-in configured (MICROSOFT_CLIENT_ID set)');
+      } else {
+        logger.warn('🔐 Microsoft sign-in NOT configured — set MICROSOFT_CLIENT_ID and restart.');
       }
       logger.info(`🔗 Signing links will point at APP_URL=${env.APP_URL}`);
       // NOTE: expired-file cleanup now runs in the worker as a BullMQ repeatable

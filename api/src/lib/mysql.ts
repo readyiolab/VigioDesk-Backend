@@ -1,6 +1,6 @@
 import type { Pool, PoolConnection } from 'mysql2/promise';
 import { logger } from './logger';
-import { ensureColumn, ensureIndex } from './ddl';
+import { ensureColumn, ensureIndex, ensureUniqueIndex } from './ddl';
 import { initializeSigningSchema } from './signingSchema';
 import { initializeByocSchema } from './byocSchema';
 import { initializeLetterSchema } from './letterSchema';
@@ -132,6 +132,11 @@ async function initializeDatabase(dbPool: Pool): Promise<void> {
 
     await ensureColumn(conn, 'tbl_user', 'failedLoginAttempts', 'INT NOT NULL DEFAULT 0 AFTER authProvider');
     await ensureColumn(conn, 'tbl_user', 'lockedUntil', 'DATETIME(3) NULL AFTER failedLoginAttempts');
+    // Provider subject IDs (OIDC `sub`) — unique when set; nullable for password/guest users.
+    await ensureColumn(conn, 'tbl_user', 'googleSub', 'VARCHAR(255) NULL AFTER lockedUntil');
+    await ensureColumn(conn, 'tbl_user', 'microsoftSub', 'VARCHAR(255) NULL AFTER googleSub');
+    await ensureUniqueIndex(conn, 'tbl_user', 'uq_user_google_sub', 'googleSub');
+    await ensureUniqueIndex(conn, 'tbl_user', 'uq_user_microsoft_sub', 'microsoftSub');
 
     await initializeSigningSchema(conn);
     await initializeByocSchema(conn);

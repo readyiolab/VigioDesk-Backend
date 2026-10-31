@@ -8,6 +8,7 @@ import {
   loginSchema,
   verifyEmailSchema,
   googleAuthSchema,
+  microsoftAuthSchema,
 } from './auth.types';
 
 const router = Router();
@@ -15,6 +16,7 @@ const router = Router();
 router.post('/register', authRateLimiter, validate(registerSchema), authController.register);
 router.post('/login', authRateLimiter, validate(loginSchema), authController.login);
 router.post('/google', authRateLimiter, validate(googleAuthSchema), authController.google);
+router.post('/microsoft', authRateLimiter, validate(microsoftAuthSchema), authController.microsoft);
 router.post('/guest', authRateLimiter, authController.guest);
 router.post('/refresh', authRateLimiter, authController.refresh);
 router.post('/logout', authMiddleware, authController.logout);

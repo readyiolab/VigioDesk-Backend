@@ -24,6 +24,23 @@ export async function ensureIndex(
   logger.info({ table, indexName }, 'Created database index');
 }
 
+/** Creates a UNIQUE index only if it doesn't already exist. */
+export async function ensureUniqueIndex(
+  conn: PoolConnection,
+  table: string,
+  indexName: string,
+  columns: string
+): Promise<void> {
+  const [rows]: any = await conn.query(
+    `SELECT COUNT(1) AS cnt FROM information_schema.statistics
+      WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?`,
+    [table, indexName]
+  );
+  if (rows[0]?.cnt > 0) return;
+  await conn.query(`CREATE UNIQUE INDEX ${indexName} ON ${table} (${columns})`);
+  logger.info({ table, indexName }, 'Created unique database index');
+}
+
 /**
  * Adds a column only if it doesn't already exist.
  *

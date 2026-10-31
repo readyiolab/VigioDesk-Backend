@@ -156,9 +156,12 @@ const envSchema = z.object({
   TSA_URL: z.string().url().default('https://freetsa.org/tsr'),
   TSA_ENABLED: envBool(true),
 
-  // Optional Microsoft Graph (OneDrive & SharePoint & Outlook) OAuth
+  // Microsoft Entra — customer ID-token login + Graph (OneDrive/Outlook) OAuth.
+  // Client secret is unused for ID-token login; required for Graph code exchange.
   MICROSOFT_CLIENT_ID: z.string().optional(),
   MICROSOFT_CLIENT_SECRET: z.string().optional(),
+  // Issuer tenant. "common" accepts any personal or work/school tenant.
+  MICROSOFT_TENANT: z.string().default('common'),
 
   // Optional Dropbox OAuth credentials
   DROPBOX_CLIENT_ID: z.string().optional(),

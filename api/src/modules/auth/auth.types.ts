@@ -51,6 +51,13 @@ export const googleAuthSchema = z.object({
   }),
 });
 
+export const microsoftAuthSchema = z.object({
+  body: z.object({
+    credential: z.string().min(20, 'Microsoft credential is required'),
+    attribution: attributionFields,
+  }),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>['body'];
 export type LoginInput = z.infer<typeof loginSchema>['body'];
 
