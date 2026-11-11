@@ -528,7 +528,7 @@ async function sendExpireSoonDigests(): Promise<void> {
 
   for (const row of rows as any[]) {
     if (!row.email || Number(row.pendingCount) <= 0) continue;
-    const lock = await import('../../lib/redis').then(({ redis }) =>
+    const lock = await import('../../lib/redis.js').then(({ redis }) =>
       redis.set(`sign:expire-digest:${row.id}`, '1', 'EX', 40 * 60 * 60, 'NX')
     );
     if (!lock) continue;

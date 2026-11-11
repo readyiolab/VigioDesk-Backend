@@ -141,7 +141,14 @@ export async function saveCompleted(input: {
         );
         const userId = userRows[0]?.userId as string | undefined;
         if (!userId) return;
-        const { emitOutboundWebhook } = await import('../../../api/src/lib/webhookOutbound');
+        const webhookPath = '../../../api/src/lib/webhookOutbound.js';
+        const { emitOutboundWebhook } = (await import(webhookPath)) as {
+          emitOutboundWebhook: (
+            eventType: string,
+            payload: Record<string, unknown>,
+            opts: { userId: string }
+          ) => Promise<void>;
+        };
         await emitOutboundWebhook(
           'webreport.ready',
           {

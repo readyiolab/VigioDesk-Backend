@@ -2,6 +2,7 @@ import { CONTRACT_VERSION } from './types';
 import type {
   AuditCheck,
   BotAccess,
+  CustomerBranding,
   DevicePerformance,
   PublicReportContract,
   Recommendation,

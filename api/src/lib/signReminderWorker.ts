@@ -36,10 +36,10 @@ export async function startSignReminderWorker(): Promise<void> {
     SIGN_REMINDER_QUEUE,
     async () => {
       await sendService.processAutomaticReminders();
-      await import('./quotaAlerts')
+      await import('./quotaAlerts.js')
         .then(({ processQuotaNearAlerts }) => processQuotaNearAlerts())
         .catch((err) => logger.warn({ err }, 'Quota-near alerts failed'));
-      await import('./stuckJobAlerts')
+      await import('./stuckJobAlerts.js')
         .then(({ processStuckJobAlerts }) => processStuckJobAlerts())
         .catch((err) => logger.warn({ err }, 'Stuck-job alerts failed'));
     },

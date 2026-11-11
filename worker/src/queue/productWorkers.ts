@@ -6,12 +6,18 @@ import { logger } from '../lib/logger';
  *
  * Imports the existing API worker modules from the monorepo source tree so we
  * do not duplicate Puppeteer/mail/finalize logic.
+ *
+ * Paths are non-literal so `tsc` does not typecheck the entire API graph from worker.
  */
 export async function startProductWorkersFromApi(): Promise<() => Promise<void>> {
   const stops: Array<() => Promise<void>> = [];
 
   try {
-    const letterMod = await import('../../../api/src/lib/letterWorkers');
+    const letterPath = '../../../api/src/lib/letterWorkers.js';
+    const letterMod = (await import(letterPath)) as {
+      startLetterWorkers: () => Promise<void>;
+      stopLetterWorkers: () => Promise<void>;
+    };
     await letterMod.startLetterWorkers();
     stops.push(async () => {
       await letterMod.stopLetterWorkers();
@@ -22,7 +28,11 @@ export async function startProductWorkersFromApi(): Promise<() => Promise<void>>
   }
 
   try {
-    const signMod = await import('../../../api/src/lib/signFinalizeWorker');
+    const signPath = '../../../api/src/lib/signFinalizeWorker.js';
+    const signMod = (await import(signPath)) as {
+      startSignFinalizeWorker: () => void;
+      stopSignFinalizeWorker: () => Promise<void>;
+    };
     signMod.startSignFinalizeWorker();
     stops.push(async () => {
       await signMod.stopSignFinalizeWorker();

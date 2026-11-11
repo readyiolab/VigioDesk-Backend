@@ -589,8 +589,8 @@ async function notifyLetterBatchComplete(opts: {
   mode: string;
   sentCount: number;
 }) {
-  const { isMailerConfigured, sendMail } = await import('./mailer');
-  const { emitOutboundWebhook } = await import('./webhookOutbound');
+  const { isMailerConfigured, sendMail } = await import('./mailer.js');
+  const { emitOutboundWebhook } = await import('./webhookOutbound.js');
   const lockKey = `letter:batch:complete:${opts.batchId}`;
   const locked = await redis.set(lockKey, '1', 'EX', 3600, 'NX');
   if (!locked) return;
