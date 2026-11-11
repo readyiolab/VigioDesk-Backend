@@ -61,6 +61,15 @@ async function reserveAiCredit(userId: string, plan: 'FREE' | 'PRO' | 'ENTERPRIS
       403
     );
   }
+  void db
+    .insert('tbl_ai_usage', {
+      id: crypto.randomUUID(),
+      userId,
+      feature: 'letter-ai',
+      credits: 1,
+      metaJson: JSON.stringify({ plan }),
+    })
+    .catch(() => undefined);
 }
 
 async function refundAiCredit(userId: string): Promise<void> {

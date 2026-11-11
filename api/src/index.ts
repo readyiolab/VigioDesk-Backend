@@ -22,6 +22,8 @@ import { isGoogleAuthConfigured } from './lib/googleAuth';
 import { isMicrosoftAuthConfigured } from './lib/microsoftAuth';
 import { startSignFinalizeWorker, stopSignFinalizeWorker } from './lib/signFinalizeWorker';
 import { startLetterWorkers, stopLetterWorkers } from './lib/letterWorkers';
+import { startSignReminderWorker, stopSignReminderWorker } from './lib/signReminderWorker';
+import { startWebreportsScheduleWorker, stopWebreportsScheduleWorker } from './lib/webreportsScheduleWorker';
 import { startStorageCacheInvalidationSubscriber, startByocHealthAlertSubscriber } from './lib/storage';
 import { redis } from './lib/redis';
 import { db } from './lib/mysql';
@@ -192,10 +194,19 @@ async function bootstrap() {
     startStorageCacheInvalidationSubscriber();
     startByocHealthAlertSubscriber();
 
-    // 2. Start sign-finalize worker (seals PDFs off the HTTP path)
-    startSignFinalizeWorker();
-    // Letter Studio PDF generation + email send workers (in-API, like sign-finalize)
-    startLetterWorkers();
+    // Heavy product workers: prefer the dedicated worker process in production
+    // (INLINE_LETTER_SIGN_WORKERS=false). Default true keeps local/single-node boot simple.
+    if (env.INLINE_LETTER_SIGN_WORKERS) {
+      startSignFinalizeWorker();
+      startLetterWorkers();
+      logger.info('Inline letter/sign workers enabled (INLINE_LETTER_SIGN_WORKERS=true)');
+    } else {
+      logger.info('Inline letter/sign workers disabled — start them from the worker process');
+    }
+    // PRO/ENTERPRISE automatic eSign recipient reminders
+    void startSignReminderWorker();
+    // Scheduled WebReports (PRO+)
+    void startWebreportsScheduleWorker();
 
     // 3. Start HTTP Server
     const server = app.listen(env.PORT, () => {
@@ -239,6 +250,18 @@ async function bootstrap() {
         logger.info('Letter workers closed.');
       } catch (err) {
         logger.warn({ err }, 'Error closing letter workers');
+      }
+      try {
+        await stopSignReminderWorker();
+        logger.info('Sign-reminder worker closed.');
+      } catch (err) {
+        logger.warn({ err }, 'Error closing sign-reminder worker');
+      }
+      try {
+        await stopWebreportsScheduleWorker();
+        logger.info('WebReport schedule worker closed.');
+      } catch (err) {
+        logger.warn({ err }, 'Error closing WebReport schedule worker');
       }
       try {
         await stopSignFinalizeWorker();

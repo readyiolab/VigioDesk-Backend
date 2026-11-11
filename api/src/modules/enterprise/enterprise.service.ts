@@ -170,6 +170,24 @@ export const enterpriseService = {
 
     if (!org) throw new AppError('Organization could not be loaded', 500);
 
+    // Keep Letters/Diagrams RBAC membership in sync for existing BYOC orgs.
+    const membership = await db.select(
+      'tbl_org_user',
+      'id',
+      'organizationId = ? AND userId = ?',
+      [org.id, userId]
+    );
+    if (!membership) {
+      await db.insert('tbl_org_user', {
+        id: crypto.randomUUID(),
+        organizationId: org.id,
+        userId,
+        role: 'OWNER',
+        invitedBy: userId,
+        status: 'ACTIVE',
+      });
+    }
+
     const storage = await db.select(
       'tbl_org_storage_config',
       '*',

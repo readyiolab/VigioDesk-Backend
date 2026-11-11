@@ -74,6 +74,13 @@ const envSchema = z.object({
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+  /** Razorpay subscription plan id for Pro checkout (e.g. plan_xxxxx). */
+  RAZORPAY_PLAN_ID: z.string().optional(),
+  /**
+   * When true (default), letter generate/send + sign-finalize workers run inside the API.
+   * Set false in production and start them from the worker process instead.
+   */
+  INLINE_LETTER_SIGN_WORKERS: envBool(true),
 
   // --- Email (SMTP) ---
   // Carries signing invitations and OTPs. All optional so the API still boots

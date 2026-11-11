@@ -509,4 +509,119 @@ export const authService = {
       user: toAuthUser({ ...user, isGuest }),
     };
   },
+
+  /**
+   * Always returns a generic success so attackers cannot probe which emails exist.
+   * Only password accounts with a bcrypt hash receive a reset email.
+   */
+  async forgotPassword(email: string): Promise<{ sent: boolean }> {
+    const normalized = email.toLowerCase().trim();
+    const user: any = await db.select(
+      'tbl_user',
+      'id, email, name, passwordHash, authProvider',
+      'email = ?',
+      [normalized]
+    );
+
+    const canReset =
+      user &&
+      user.authProvider !== 'guest' &&
+      user.authProvider !== 'google' &&
+      user.authProvider !== 'microsoft' &&
+      user.passwordHash &&
+      String(user.passwordHash).startsWith('$2');
+
+    if (canReset) {
+      const reset = mintVerifyToken();
+      await db.update(
+        'tbl_user',
+        {
+          passwordResetToken: reset.hash,
+          passwordResetExpiresAt: reset.expiresAt,
+        },
+        'id = ?',
+        [user.id]
+      );
+      void sendPasswordResetEmail(user.email, user.name, reset.raw).catch((err) => {
+        logger.error({ err, email: user.email }, 'Failed to send password reset email');
+      });
+    } else if (env.NODE_ENV === 'development') {
+      logger.info({ email: normalized }, 'Forgot-password: no resettable password account');
+    }
+
+    return { sent: true };
+  },
+
+  async resetPassword(rawToken: string, newPassword: string): Promise<{ reset: boolean }> {
+    const hash = hashVerifyToken(rawToken);
+    const user: any = await db.select(
+      'tbl_user',
+      'id, email, passwordResetExpiresAt, authProvider',
+      'passwordResetToken = ?',
+      [hash]
+    );
+    if (!user) {
+      throw new AppError('This reset link is invalid or has already been used', 400);
+    }
+    if (user.passwordResetExpiresAt && new Date(user.passwordResetExpiresAt) < new Date()) {
+      throw new AppError('This reset link has expired. Please request a new one.', 400);
+    }
+    if (
+      user.authProvider === 'guest' ||
+      user.authProvider === 'google' ||
+      user.authProvider === 'microsoft'
+    ) {
+      throw new AppError('This account signs in with a social provider, not a password', 400);
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, env.BCRYPT_ROUNDS);
+    await db.update(
+      'tbl_user',
+      {
+        passwordHash,
+        passwordResetToken: null,
+        passwordResetExpiresAt: null,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        authProvider: 'password',
+      },
+      'id = ?',
+      [user.id]
+    );
+    await invalidateUser(user.id).catch(() => undefined);
+    logger.info({ userId: user.id }, 'Password reset completed');
+    return { reset: true };
+  },
 };
+
+async function sendPasswordResetEmail(
+  email: string,
+  name: string | null,
+  rawToken: string
+): Promise<void> {
+  if (!isMailerConfigured()) {
+    logger.warn({ email }, 'SMTP not configured — skipping password reset email (dev)');
+    if (env.NODE_ENV === 'development') {
+      logger.info({ link: `${env.APP_URL}/reset-password?token=${rawToken}` }, 'Dev password reset link');
+    }
+    return;
+  }
+
+  const link = `${env.APP_URL}/reset-password?token=${encodeURIComponent(rawToken)}`;
+  const greeting = name ? `Hi ${name},` : 'Hi,';
+  const text = `${greeting}\n\nReset your Vigodesk password by opening this link:\n${link}\n\nThis link expires in 24 hours.\n\nIf you did not request a reset, ignore this email.`;
+  const html = `
+    <p>${greeting}</p>
+    <p>Reset your <strong>Vigodesk</strong> password.</p>
+    <p><a href="${link}" style="display:inline-block;padding:12px 20px;background:#2563eb;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">Reset password</a></p>
+    <p style="color:#64748b;font-size:13px">Or paste this link into your browser:<br/>${link}</p>
+    <p style="color:#64748b;font-size:13px">This link expires in 24 hours. If you did not request a reset, ignore this email.</p>
+  `;
+
+  await sendMail({
+    to: email,
+    subject: 'Reset your Vigodesk password',
+    text,
+    html,
+  });
+}

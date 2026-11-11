@@ -163,6 +163,14 @@ export const finalizeService = {
         logger.error({ err, documentId }, 'Failed to send completion emails');
       });
 
+      void import('../../lib/webhookOutbound').then(({ emitOutboundWebhook }) =>
+        emitOutboundWebhook(
+          'document.completed',
+          { documentId, title: doc!.title, status: 'COMPLETED' },
+          { userId: doc!.ownerId }
+        )
+      );
+
       void (async () => {
         try {
           const recipients = await db.selectAll(

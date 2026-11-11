@@ -11,6 +11,9 @@ router.use(authMiddleware, requireFullAccount, requireVerifiedEmail);
 
 router.post('/', webreportsCreateLimiter, validate(createWebReportSchema), webreportsController.create);
 router.get('/', validate(listWebReportsSchema), webreportsController.list);
+router.get('/schedules', webreportsController.listSchedules);
+router.post('/schedules', webreportsCreateLimiter, webreportsController.createSchedule);
+router.delete('/schedules/:scheduleId', webreportsController.deleteSchedule);
 router.get('/:id', webreportsPollLimiter, validate(reportIdSchema), webreportsController.get);
 router.post('/:id/rescan', webreportsCreateLimiter, validate(rescanSchema), webreportsController.rescan);
 router.patch('/:id/branding', validate(updateBrandingSchema), webreportsController.updateBranding);

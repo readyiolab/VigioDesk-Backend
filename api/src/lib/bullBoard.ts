@@ -6,6 +6,13 @@ import crypto from 'crypto';
 import { env } from '../config/env';
 import { heavyQueue, lightQueue, maintenanceQueue, deadQueue, signFinalizeQueue } from './queue';
 import { webreportsQueue } from './webreportsQueue';
+import {
+  letterGenerateQueue,
+  letterParseQueue,
+  letterSendQueue,
+  letterZipQueue,
+  aiExtractQueue,
+} from './letterQueues';
 
 const BASE_PATH = '/admin/queues';
 
@@ -53,6 +60,11 @@ export function createDashboard() {
       new BullMQAdapter(deadQueue),
       new BullMQAdapter(signFinalizeQueue),
       new BullMQAdapter(webreportsQueue),
+      new BullMQAdapter(letterGenerateQueue),
+      new BullMQAdapter(letterParseQueue),
+      new BullMQAdapter(letterSendQueue),
+      new BullMQAdapter(letterZipQueue),
+      new BullMQAdapter(aiExtractQueue),
     ],
     serverAdapter,
   });

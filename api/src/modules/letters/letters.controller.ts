@@ -436,6 +436,21 @@ export const lettersController = {
       next(e);
     }
   },
+  async retryFailedSend(req: Request, res: Response, next: NextFunction) {
+    try {
+      res.json(
+        await sendService.retryFailedSend(
+          req.orgContext!.organizationId,
+          req.user.id,
+          req.user.plan,
+          req.params.batchId,
+          req.body || {}
+        )
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
 
   // --- History / audit ---
   async audit(req: Request, res: Response, next: NextFunction) {

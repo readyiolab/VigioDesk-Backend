@@ -9,6 +9,8 @@ import {
   verifyEmailSchema,
   googleAuthSchema,
   microsoftAuthSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
 } from './auth.types';
 
 const router = Router();
@@ -22,5 +24,7 @@ router.post('/refresh', authRateLimiter, authController.refresh);
 router.post('/logout', authMiddleware, authController.logout);
 router.post('/verify-email', authRateLimiter, validate(verifyEmailSchema), authController.verifyEmail);
 router.post('/resend-verification', authRateLimiter, authMiddleware, authController.resendVerification);
+router.post('/forgot-password', authRateLimiter, validate(forgotPasswordSchema), authController.forgotPassword);
+router.post('/reset-password', authRateLimiter, validate(resetPasswordSchema), authController.resetPassword);
 
 export default router;

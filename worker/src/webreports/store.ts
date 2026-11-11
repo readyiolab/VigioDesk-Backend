@@ -131,6 +131,31 @@ export async function saveCompleted(input: {
       ]
     );
     await conn.commit();
+
+    // Best-effort outbound webhook (does not affect report success).
+    void (async () => {
+      try {
+        const [userRows] = await pool.query<RowDataPacket[]>(
+          `SELECT userId FROM tbl_webreport WHERE id = ?`,
+          [input.reportId]
+        );
+        const userId = userRows[0]?.userId as string | undefined;
+        if (!userId) return;
+        const { emitOutboundWebhook } = await import('../../../api/src/lib/webhookOutbound');
+        await emitOutboundWebhook(
+          'webreport.ready',
+          {
+            reportId: input.reportId,
+            overallScore: input.scores.overall,
+            summaryHeadline: input.summaryHeadline,
+          },
+          { userId }
+        );
+      } catch {
+        /* worker may not resolve API module in all deploy layouts */
+      }
+    })();
+
     return true;
   } catch (err) {
     await conn.rollback();

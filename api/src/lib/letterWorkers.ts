@@ -561,7 +561,69 @@ async function processSendChunk(job: Job<LetterSendJob>) {
     [batchId, organizationId]
   );
 
+  // When no employees remain pending, notify owner + emit webhook once.
+  const pending = await db.queryAll<any>(
+    `SELECT COUNT(*) AS cnt FROM tbl_letter_batch_employee
+      WHERE batchId = ? AND sendStatus IN ('PENDING', 'SENDING')`,
+    [batchId]
+  );
+  if (Number(pending[0]?.cnt || 0) === 0) {
+    await notifyLetterBatchComplete({
+      batchId,
+      organizationId,
+      userId,
+      mode,
+      sentCount: Number(sentCountRow[0]?.cnt || 0),
+    }).catch((err) => {
+      logger.warn({ err, batchId }, 'Letter batch completion notify failed');
+    });
+  }
+
   logger.info({ batchId, sent, mode }, 'Letter send chunk complete');
+}
+
+async function notifyLetterBatchComplete(opts: {
+  batchId: string;
+  organizationId: string;
+  userId: string;
+  mode: string;
+  sentCount: number;
+}) {
+  const { isMailerConfigured, sendMail } = await import('./mailer');
+  const { emitOutboundWebhook } = await import('./webhookOutbound');
+  const lockKey = `letter:batch:complete:${opts.batchId}`;
+  const locked = await redis.set(lockKey, '1', 'EX', 3600, 'NX');
+  if (!locked) return;
+
+  const failedRow = await db.queryAll<any>(
+    `SELECT COUNT(*) AS cnt FROM tbl_letter_batch_employee WHERE batchId = ? AND sendStatus = 'FAILED'`,
+    [opts.batchId]
+  );
+  const failedCount = Number(failedRow[0]?.cnt || 0);
+  const user: any = await db.select('tbl_user', 'id, email, name', 'id = ?', [opts.userId]);
+
+  if (user?.email && isMailerConfigured()) {
+    const subject = `Letter batch finished (${opts.sentCount} sent${failedCount ? `, ${failedCount} failed` : ''})`;
+    const text = `Your letter batch ${opts.batchId} finished.\nSent/drafted: ${opts.sentCount}\nFailed: ${failedCount}\nMode: ${opts.mode}`;
+    await sendMail({
+      to: user.email,
+      subject,
+      text,
+      html: `<p>Hi ${user.name || 'there'},</p><p>${text.replace(/\n/g, '<br/>')}</p>`,
+    });
+  }
+
+  void emitOutboundWebhook(
+    'letter.batch.sent',
+    {
+      batchId: opts.batchId,
+      organizationId: opts.organizationId,
+      sentCount: opts.sentCount,
+      failedCount,
+      mode: opts.mode,
+    },
+    { userId: opts.userId, organizationId: opts.organizationId }
+  );
 }
 
 async function sendViaGraph(

@@ -90,6 +90,11 @@ router.post(
   validate(sendBatchSchema),
   lettersController.startSend
 );
+router.post(
+  '/batches/:batchId/send/retry-failed',
+  editor,
+  lettersController.retryFailedSend
+);
 router.get('/batches/:batchId/report', member, lettersController.report);
 router.post('/batches/:batchId/pdfs/zip', member, lettersController.downloadPdfsZip);
 router.get(

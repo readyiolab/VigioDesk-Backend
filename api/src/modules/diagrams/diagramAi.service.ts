@@ -109,6 +109,15 @@ async function reserveAiCredit(userId: string, limit: number, plan: Plan): Promi
       403
     );
   }
+  void db
+    .insert('tbl_ai_usage', {
+      id: crypto.randomUUID(),
+      userId,
+      feature: 'diagram-ai',
+      credits: 1,
+      metaJson: JSON.stringify({ plan }),
+    })
+    .catch(() => undefined);
 }
 
 async function refundAiCredit(userId: string): Promise<void> {

@@ -8,6 +8,7 @@ import { invitationEmail } from './email.templates';
 import { SIGNING_LIMITS } from '../../../../shared/signing';
 import { PLAN_LIMITS } from '../../../../shared/constants';
 import { recordCustomerEvent, upsertContact } from '../../lib/customerTracking';
+import { auditService } from './audit.service';
 
 /** Rolling window (ms) over which the monthly signing quota is counted. */
 const SIGN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
@@ -401,9 +402,145 @@ export const sendService = {
       senderName,
       recipient.tokenExpiresAt ? new Date(recipient.tokenExpiresAt) : null
     );
+    const delivered = notified.some((n) => n.delivered);
+    if (delivered) {
+      await db.update(
+        'tbl_sign_recipient',
+        {
+          lastRemindedAt: new Date(),
+          reminderCount: (Number(recipient.reminderCount) || 0) + 1,
+        },
+        'id = ?',
+        [recipientId]
+      );
+    }
     return { documentId, notified };
   },
+
+  /**
+   * PRO/ENTERPRISE automatic reminders for pending signers.
+   * Interval: 3 days since last reminder (or sentAt). Cap: 5 reminders per recipient.
+   */
+  async processAutomaticReminders(): Promise<{ reminded: number }> {
+    if (!isMailerConfigured()) return { reminded: 0 };
+
+    const REMINDER_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
+    const MAX_REMINDERS = 5;
+    const cutoff = new Date(Date.now() - REMINDER_INTERVAL_MS);
+
+    const rows = await db.queryAll(
+      `SELECT r.id AS recipientId, r.name, r.email, r.signingToken, r.tokenExpiresAt,
+              r.status AS recipientStatus, r.reminderCount, r.lastRemindedAt,
+              d.id AS documentId, d.title, d.message, d.expiresAt, d.sentAt, d.ownerId,
+              u.name AS ownerName, u.plan
+         FROM tbl_sign_recipient r
+         JOIN tbl_sign_document d ON d.id = r.documentId
+         JOIN tbl_user u ON u.id = d.ownerId
+        WHERE d.status = 'SENT'
+          AND r.status IN ('PENDING', 'SENT', 'VIEWED')
+          AND r.signingToken IS NOT NULL
+          AND r.role IN ('SIGNER', 'APPROVER')
+          AND COALESCE(r.reminderCount, 0) < ?
+          AND COALESCE(r.lastRemindedAt, d.sentAt, d.createdAt) < ?
+          AND u.plan IN ('PRO', 'ENTERPRISE')
+        ORDER BY COALESCE(r.lastRemindedAt, d.sentAt) ASC
+        LIMIT 100`,
+      [MAX_REMINDERS, cutoff]
+    );
+
+    let reminded = 0;
+    for (const row of rows as any[]) {
+      try {
+        const tokens = new Map([[row.recipientId, row.signingToken]]);
+        const recipient = {
+          id: row.recipientId,
+          name: row.name,
+          email: row.email,
+          signingToken: row.signingToken,
+          tokenExpiresAt: row.tokenExpiresAt,
+        };
+        const doc = {
+          id: row.documentId,
+          title: row.title,
+          message: row.message,
+          expiresAt: row.expiresAt,
+        };
+        const notified = await deliverInvitations(
+          [recipient],
+          tokens,
+          doc,
+          row.ownerName || 'Vigodesk',
+          row.tokenExpiresAt ? new Date(row.tokenExpiresAt) : null
+        );
+        if (notified.some((n) => n.delivered)) {
+          await db.update(
+            'tbl_sign_recipient',
+            {
+              lastRemindedAt: new Date(),
+              reminderCount: (Number(row.reminderCount) || 0) + 1,
+            },
+            'id = ?',
+            [row.recipientId]
+          );
+          await auditService.record(null, {
+            documentId: row.documentId,
+            recipientId: row.recipientId,
+            action: 'REMINDER_SENT',
+            actorId: row.ownerId,
+            detail: `Automatic reminder sent to ${row.email}`,
+          });
+          reminded += 1;
+        }
+      } catch (err) {
+        logger.warn({ err, recipientId: row.recipientId }, 'Automatic signing reminder failed');
+      }
+    }
+
+    // Expire-soon digests for owners (docs expiring within 48h).
+    await sendExpireSoonDigests().catch((err) => {
+      logger.warn({ err }, 'Signing expire-soon digest failed');
+    });
+
+    if (reminded > 0) {
+      logger.info({ reminded }, 'Automatic signing reminders sent');
+    }
+    return { reminded };
+  },
 };
+
+async function sendExpireSoonDigests(): Promise<void> {
+  if (!isMailerConfigured()) return;
+  const soon = new Date(Date.now() + 48 * 60 * 60 * 1000);
+  const rows = await db.queryAll(
+    `SELECT d.id, d.title, d.expiresAt, d.ownerId, u.email, u.name,
+            (SELECT COUNT(*) FROM tbl_sign_recipient r
+              WHERE r.documentId = d.id AND r.status IN ('PENDING','SENT','VIEWED')) AS pendingCount
+       FROM tbl_sign_document d
+       JOIN tbl_user u ON u.id = d.ownerId
+      WHERE d.status = 'SENT'
+        AND d.expiresAt IS NOT NULL
+        AND d.expiresAt > NOW()
+        AND d.expiresAt <= ?
+      ORDER BY d.expiresAt ASC
+      LIMIT 50`,
+    [soon]
+  );
+
+  for (const row of rows as any[]) {
+    if (!row.email || Number(row.pendingCount) <= 0) continue;
+    const lock = await import('../../lib/redis').then(({ redis }) =>
+      redis.set(`sign:expire-digest:${row.id}`, '1', 'EX', 40 * 60 * 60, 'NX')
+    );
+    if (!lock) continue;
+    const when = new Date(row.expiresAt).toISOString();
+    await sendMail({
+      to: row.email,
+      subject: `Signing deadline soon: ${row.title || 'Document'}`,
+      text: `Hi ${row.name || 'there'},\n\nYour document "${row.title}" still has ${row.pendingCount} pending signer(s) and expires at ${when}.\n\nOpen Vigodesk to send a reminder or extend the deadline.`,
+      html: `<p>Hi ${row.name || 'there'},</p><p>Your document <strong>${row.title}</strong> still has <strong>${row.pendingCount}</strong> pending signer(s) and expires at <strong>${when}</strong>.</p>`,
+    }).catch(() => undefined);
+  }
+}
 
 /**
  * Emails invitations.

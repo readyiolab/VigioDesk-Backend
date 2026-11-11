@@ -126,4 +126,24 @@ export async function initializeWebReportSchema(conn: PoolConnection): Promise<v
   await ensureIndex(conn, 'tbl_webreport_page', 'idx_webreport_page_report', 'reportId');
   await ensureIndex(conn, 'tbl_webreport_check', 'idx_webreport_check_report', 'reportId, checkId');
   await ensureIndex(conn, 'tbl_webreport_perf', 'idx_webreport_perf_report', 'reportId, device');
+
+  await conn.query(`
+    CREATE TABLE IF NOT EXISTS tbl_webreport_schedule (
+      id VARCHAR(255) PRIMARY KEY,
+      userId VARCHAR(255) NOT NULL,
+      sourceReportId VARCHAR(255) NULL,
+      url VARCHAR(2048) NOT NULL,
+      intervalHours INT NOT NULL DEFAULT 168,
+      enabled TINYINT(1) NOT NULL DEFAULT 1,
+      nextRunAt DATETIME(3) NOT NULL,
+      lastReportId VARCHAR(255) NULL,
+      lastRunAt DATETIME(3) NULL,
+      maxPages INT NOT NULL DEFAULT 50,
+      createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      updatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+      INDEX idx_webreport_schedule_due (enabled, nextRunAt),
+      INDEX idx_webreport_schedule_user (userId, createdAt),
+      CONSTRAINT fk_webreport_schedule_user FOREIGN KEY (userId) REFERENCES tbl_user(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  `);
 }

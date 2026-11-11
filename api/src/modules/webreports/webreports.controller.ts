@@ -1,7 +1,33 @@
 import { Request, Response, NextFunction } from 'express';
 import { webreportsService } from './webreports.service';
+import { webreportsScheduleService } from './webreports.schedule';
 
 export const webreportsController = {
+  async listSchedules(req: Request, res: Response, next: NextFunction) {
+    try {
+      res.status(200).json({ schedules: await webreportsScheduleService.list(req.user.id) });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async createSchedule(req: Request, res: Response, next: NextFunction) {
+    try {
+      const schedule = await webreportsScheduleService.create(req.user.id, req.user.plan, req.body);
+      res.status(201).json({ schedule });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async deleteSchedule(req: Request, res: Response, next: NextFunction) {
+    try {
+      res.status(200).json(await webreportsScheduleService.remove(req.user.id, req.params.scheduleId));
+    } catch (err) {
+      next(err);
+    }
+  },
+
   async create(req: Request, res: Response, next: NextFunction) {
     try {
       const result = await webreportsService.create(req.user.id, req.user.plan, req.body);

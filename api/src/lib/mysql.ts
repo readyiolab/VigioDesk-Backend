@@ -7,6 +7,9 @@ import { initializeLetterSchema } from './letterSchema';
 import { initializeDiagramSchema } from './diagramSchema';
 import { initializeCustomerTrackingSchema } from './customerTrackingSchema';
 import { initializeWebReportSchema } from './webreportSchema';
+import { initializeWebhookOutboundSchema } from './webhookOutboundSchema';
+import { initializeAssetLibrarySchema } from './assetLibrarySchema';
+import { initializeAiUsageSchema } from './aiUsageSchema';
 import { seedPlatformAdmin } from './seedPlatformAdmin';
 import { db } from './database';
 
@@ -137,6 +140,9 @@ async function initializeDatabase(dbPool: Pool): Promise<void> {
     await ensureColumn(conn, 'tbl_user', 'microsoftSub', 'VARCHAR(255) NULL AFTER googleSub');
     await ensureUniqueIndex(conn, 'tbl_user', 'uq_user_google_sub', 'googleSub');
     await ensureUniqueIndex(conn, 'tbl_user', 'uq_user_microsoft_sub', 'microsoftSub');
+    await ensureColumn(conn, 'tbl_user', 'passwordResetToken', 'VARCHAR(64) NULL AFTER microsoftSub');
+    await ensureColumn(conn, 'tbl_user', 'passwordResetExpiresAt', 'DATETIME(3) NULL AFTER passwordResetToken');
+    await ensureIndex(conn, 'tbl_user', 'idx_user_password_reset_token', 'passwordResetToken');
 
     await initializeSigningSchema(conn);
     await initializeByocSchema(conn);
@@ -145,6 +151,9 @@ async function initializeDatabase(dbPool: Pool): Promise<void> {
     await initializeDiagramSchema(conn);
     await initializeCustomerTrackingSchema(conn);
     await initializeWebReportSchema(conn);
+    await initializeWebhookOutboundSchema(conn);
+    await initializeAssetLibrarySchema(conn);
+    await initializeAiUsageSchema(conn);
     await seedPlatformAdmin(conn);
 
     logger.info('Prefixed database tables (tbl_) initialization complete.');

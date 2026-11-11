@@ -14,6 +14,7 @@ import lettersRoutes from '../modules/letters/letters.routes';
 import trackingRoutes from '../modules/tracking/tracking.routes';
 import webreportsRoutes from '../modules/webreports/webreports.routes';
 import publicWebReportsRoutes from '../modules/webreports/public.routes';
+import assetsRoutes from '../modules/assets/assets.routes';
 
 const router = Router();
 
@@ -23,6 +24,7 @@ const router = Router();
 router.use('/health', healthRoutes);
 router.use('/auth', authRoutes);
 router.use('/users', usersRoutes);
+router.use('/assets', assetsRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/jobs', jobsRoutes);
 router.use('/billing', billingRoutes);

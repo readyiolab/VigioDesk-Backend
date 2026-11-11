@@ -10,6 +10,7 @@ import {
   stopAuxWorkers,
 } from './queue/auxWorkers';
 import { startSignConvertWorker } from './queue/signConvert.worker';
+import { startProductWorkersFromApi } from './queue/productWorkers';
 import { redis } from './lib/redis';
 import { createMysqlPool, db } from './lib/mysql';
 import { startWorkerStorageCacheSubscriber } from './storage/s3';
@@ -31,6 +32,7 @@ let maintenanceWorker: any;
 let letterZipWorker: any;
 let aiExtractWorker: any;
 let signConvertWorker: any;
+let stopProductWorkers: (() => Promise<void>) | null = null;
 let server: any;
 
 // Spin up a minimal Express server for container/health checks
@@ -98,6 +100,11 @@ const gracefulShutdown = async () => {
     logger.info('Sign-convert worker closed.');
   }
 
+  if (stopProductWorkers) {
+    await stopProductWorkers();
+    logger.info('Product workers (letter/sign) closed.');
+  }
+
   // Disconnect Redis
   await redis.quit();
   logger.info('Redis connection closed.');
@@ -131,6 +138,12 @@ async function bootstrap() {
     letterZipWorker = startLetterZipWorker();
     aiExtractWorker = startAiExtractWorker();
     signConvertWorker = startSignConvertWorker();
+
+    // Optional: run letter generate/send + sign-finalize here when API
+    // has INLINE_LETTER_SIGN_WORKERS=false. Enable with RUN_PRODUCT_WORKERS=true.
+    if (String(process.env.RUN_PRODUCT_WORKERS || '').toLowerCase() === 'true') {
+      stopProductWorkers = await startProductWorkersFromApi();
+    }
 
     // 3. Start health check listener
     server = app.listen(env.PORT, () => {

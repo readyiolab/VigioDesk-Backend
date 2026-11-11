@@ -39,22 +39,35 @@ export class CloudController {
         return;
       }
 
-      const { provider, accountEmail, accessToken, refreshToken } = req.body;
-      if (!provider || !accountEmail) {
-        res.status(400).json({ status: 'error', message: 'provider and accountEmail are required' });
+      const { provider, accountEmail, accessToken, refreshToken, code, redirectUri } = req.body;
+      if (!provider) {
+        res.status(400).json({ status: 'error', message: 'provider is required' });
         return;
       }
 
-      const integration = await CloudService.connectProvider(userId, {
-        provider,
-        accountEmail,
-        accessToken,
-        refreshToken,
-      });
+      let integration;
+      if (code) {
+        integration = await CloudService.exchangeAndConnect(userId, provider, code, redirectUri);
+      } else {
+        if (!accountEmail || !accessToken) {
+          res.status(400).json({
+            status: 'error',
+            message: 'provider, accountEmail, and accessToken are required (or pass code for OAuth exchange)',
+          });
+          return;
+        }
+        integration = await CloudService.connectProvider(userId, {
+          provider,
+          accountEmail,
+          accessToken,
+          refreshToken,
+        });
+      }
 
       res.json({ status: 'success', data: integration, message: `Successfully connected ${provider}` });
     } catch (err: any) {
-      res.status(500).json({ status: 'error', message: err.message || 'Failed to connect cloud provider' });
+      const status = typeof err?.statusCode === 'number' ? err.statusCode : 500;
+      res.status(status).json({ status: 'error', message: err.message || 'Failed to connect cloud provider' });
     }
   }
 

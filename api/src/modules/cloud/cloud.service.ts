@@ -137,11 +137,211 @@ export class CloudService {
   }
 
   /**
+   * Exchange an authorization code for tokens, then connect the provider.
+   * Rejects missing codes — no more invented oauth2_token_* placeholders.
+   */
+  static async exchangeAndConnect(
+    userId: string,
+    provider: CloudProvider,
+    code: string,
+    redirectUri?: string
+  ): Promise<CloudIntegration> {
+    if (!code?.trim()) {
+      throw new AppError('OAuth authorization code is required', 400);
+    }
+    const redirect = redirectUri || `${env.APP_URL}/oauth/callback/${provider}`;
+    const tokens = await CloudService.exchangeAuthorizationCode(provider, code.trim(), redirect);
+    return CloudService.connectProvider(userId, {
+      provider,
+      accountEmail: tokens.email,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken || undefined,
+    });
+  }
+
+  static async exchangeAuthorizationCode(
+    provider: CloudProvider,
+    code: string,
+    redirectUri: string
+  ): Promise<{ accessToken: string; refreshToken: string | null; email: string }> {
+    switch (provider) {
+      case 'gdrive': {
+        const clientId = env.GOOGLE_CLIENT_ID;
+        const clientSecret = env.GOOGLE_CLIENT_SECRET;
+        if (!clientId || !clientSecret) {
+          throw new AppError('Google Drive OAuth is not configured', 503);
+        }
+        const body = new URLSearchParams({
+          code,
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code',
+        });
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body,
+        });
+        if (!tokenRes.ok) {
+          throw new AppError('Google OAuth token exchange failed', 401);
+        }
+        const tokenJson: any = await tokenRes.json();
+        const accessToken = String(tokenJson.access_token || '');
+        if (!accessToken) throw new AppError('Google did not return an access token', 401);
+        const profileRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const profile: any = profileRes.ok ? await profileRes.json() : {};
+        return {
+          accessToken,
+          refreshToken: tokenJson.refresh_token ? String(tokenJson.refresh_token) : null,
+          email: String(profile.email || 'google-user@drive.local'),
+        };
+      }
+
+      case 'onedrive':
+      case 'sharepoint': {
+        const clientId = env.MICROSOFT_CLIENT_ID;
+        const clientSecret = env.MICROSOFT_CLIENT_SECRET;
+        if (!clientId || !clientSecret) {
+          throw new AppError('Microsoft cloud OAuth is not configured', 503);
+        }
+        const body = new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          code,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code',
+        });
+        const tokenRes = await fetch(
+          'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body,
+          }
+        );
+        if (!tokenRes.ok) {
+          throw new AppError('Microsoft OAuth token exchange failed', 401);
+        }
+        const tokenJson: any = await tokenRes.json();
+        const accessToken = String(tokenJson.access_token || '');
+        if (!accessToken) throw new AppError('Microsoft did not return an access token', 401);
+        const meRes = await fetch('https://graph.microsoft.com/v1.0/me', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const me: any = meRes.ok ? await meRes.json() : {};
+        return {
+          accessToken,
+          refreshToken: tokenJson.refresh_token ? String(tokenJson.refresh_token) : null,
+          email: String(me.mail || me.userPrincipalName || 'microsoft-user@outlook.local'),
+        };
+      }
+
+      case 'dropbox': {
+        const clientId = env.DROPBOX_CLIENT_ID;
+        const clientSecret = env.DROPBOX_CLIENT_SECRET;
+        if (!clientId || !clientSecret) {
+          throw new AppError('Dropbox OAuth is not configured', 503);
+        }
+        const body = new URLSearchParams({
+          code,
+          grant_type: 'authorization_code',
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+        });
+        const tokenRes = await fetch('https://api.dropboxapi.com/oauth2/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body,
+        });
+        if (!tokenRes.ok) {
+          throw new AppError('Dropbox OAuth token exchange failed', 401);
+        }
+        const tokenJson: any = await tokenRes.json();
+        const accessToken = String(tokenJson.access_token || '');
+        if (!accessToken) throw new AppError('Dropbox did not return an access token', 401);
+        let email = 'dropbox-user@dropbox.local';
+        try {
+          const acctRes = await fetch('https://api.dropboxapi.com/2/users/get_current_account', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          if (acctRes.ok) {
+            const acct: any = await acctRes.json();
+            if (acct?.email) email = String(acct.email);
+          }
+        } catch {
+          /* keep fallback email */
+        }
+        return {
+          accessToken,
+          refreshToken: tokenJson.refresh_token ? String(tokenJson.refresh_token) : null,
+          email,
+        };
+      }
+
+      case 'box': {
+        const clientId = env.BOX_CLIENT_ID;
+        const clientSecret = env.BOX_CLIENT_SECRET;
+        if (!clientId || !clientSecret) {
+          throw new AppError('Box OAuth is not configured', 503);
+        }
+        const body = new URLSearchParams({
+          grant_type: 'authorization_code',
+          code,
+          client_id: clientId,
+          client_secret: clientSecret,
+        });
+        const tokenRes = await fetch('https://api.box.com/oauth2/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body,
+        });
+        if (!tokenRes.ok) {
+          throw new AppError('Box OAuth token exchange failed', 401);
+        }
+        const tokenJson: any = await tokenRes.json();
+        const accessToken = String(tokenJson.access_token || '');
+        if (!accessToken) throw new AppError('Box did not return an access token', 401);
+        let email = 'box-user@box.local';
+        try {
+          const meRes = await fetch('https://api.box.com/2.0/users/me', {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          if (meRes.ok) {
+            const me: any = await meRes.json();
+            if (me?.login) email = String(me.login);
+          }
+        } catch {
+          /* keep fallback */
+        }
+        return {
+          accessToken,
+          refreshToken: tokenJson.refresh_token ? String(tokenJson.refresh_token) : null,
+          email,
+        };
+      }
+
+      default:
+        throw new AppError(`Unsupported cloud provider: ${provider}`, 400);
+    }
+  }
+
+  /**
    * Connect or update a cloud integration for a user (UPSERT)
    */
   static async connectProvider(userId: string, dto: ConnectCloudDto): Promise<CloudIntegration> {
+    if (!dto.accessToken?.trim() || dto.accessToken.startsWith('oauth2_token')) {
+      throw new AppError(
+        'A real OAuth access token is required. Use the Connect button to authorize with the provider.',
+        400
+      );
+    }
     const id = crypto.randomUUID();
-    const accessToken = sealToken(dto.accessToken || `oauth2_token_${Date.now()}`);
+    const accessToken = sealToken(dto.accessToken);
     const refreshToken = sealToken(dto.refreshToken || null);
 
     await db.execute(

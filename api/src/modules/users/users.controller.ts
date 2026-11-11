@@ -12,4 +12,12 @@ export const usersController = {
       next(err);
     }
   },
+
+  async getUsage(req: Request, res: Response, next: NextFunction) {
+    try {
+      res.status(200).json(await usersService.getUsage(req.user.id));
+    } catch (err) {
+      next(err);
+    }
+  },
 };

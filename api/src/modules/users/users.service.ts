@@ -14,6 +14,50 @@ function asBool(value: unknown): boolean {
 }
 
 export const usersService = {
+  /** Usage dashboard vs plan limits (ops, signs, AI, webreports). */
+  async getUsage(userId: string) {
+    const user: any = await db.select(
+      'tbl_user',
+      'id, plan, dailyOpsUsed, dailyOpsResetAt, monthlySignsUsed, monthlySignsResetAt, monthlyAiUsed, monthlyAiResetAt, dailyWebReportsUsed, dailyWebReportsResetAt',
+      'id = ?',
+      [userId]
+    );
+    if (!user) throw new AppError('User not found', 404);
+    const plan = (user.plan as 'FREE' | 'PRO' | 'ENTERPRISE') || 'FREE';
+    const limits = PLAN_LIMITS[plan];
+    const aiLedger = await db.queryAll(
+      `SELECT feature, SUM(credits) AS credits
+         FROM tbl_ai_usage
+        WHERE userId = ? AND createdAt >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        GROUP BY feature
+        ORDER BY credits DESC
+        LIMIT 20`,
+      [userId]
+    ).catch(() => []);
+
+    return {
+      plan,
+      limits: {
+        maxDailyOps: limits.maxDailyOps,
+        maxMonthlySigns: limits.maxMonthlySigns,
+        maxMonthlyAiCredits: limits.maxMonthlyAiCredits,
+        maxDailyWebReports: limits.maxDailyWebReports,
+        maxFileSize: limits.maxFileSize,
+      },
+      usage: {
+        dailyOpsUsed: Number(user.dailyOpsUsed || 0),
+        monthlySignsUsed: Number(user.monthlySignsUsed || 0),
+        monthlyAiUsed: Number(user.monthlyAiUsed || 0),
+        dailyWebReportsUsed: Number(user.dailyWebReportsUsed || 0),
+        dailyOpsResetAt: user.dailyOpsResetAt,
+        monthlySignsResetAt: user.monthlySignsResetAt,
+        monthlyAiResetAt: user.monthlyAiResetAt,
+        dailyWebReportsResetAt: user.dailyWebReportsResetAt,
+      },
+      aiByFeature: aiLedger,
+    };
+  },
+
   async getUserProfile(userId: string) {
     const user = await db.select(
       'tbl_user',

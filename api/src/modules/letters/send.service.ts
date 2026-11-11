@@ -509,4 +509,102 @@ export const sendService = {
       from: account.emailAddress,
     };
   },
+
+  /** Re-queue employees whose sendStatus is FAILED (PDFs already generated). */
+  async retryFailedSend(
+    organizationId: string,
+    userId: string,
+    plan: 'FREE' | 'PRO' | 'ENTERPRISE',
+    batchId: string,
+    input: {
+      mode?: 'CREATE_DRAFTS' | 'SEND_NOW';
+      subject?: string;
+      bodyHtml?: string;
+      mailAccountId?: string;
+      confirmSendCount?: number;
+    }
+  ) {
+    const batch: any = await batchService.get(organizationId, batchId);
+    const limits = PLAN_LIMITS[plan];
+    if (!limits.letterSendingEnabled) {
+      throw new AppError('Email sending is not available on the FREE plan.', 403);
+    }
+
+    const failed = await db.queryAll<any>(
+      `SELECT id FROM tbl_letter_batch_employee
+        WHERE batchId = ?
+          AND pdfKey IS NOT NULL AND pdfKey <> ''
+          AND sendStatus = 'FAILED'
+        ORDER BY rowIndex ASC`,
+      [batchId]
+    );
+    if (!failed.length) throw new AppError('No failed sends to retry.', 400);
+
+    const mailAccountId = input.mailAccountId;
+    if (!mailAccountId) {
+      throw new AppError('mailAccountId is required to retry failed sends.', 400);
+    }
+    const account = await db.select(
+      'tbl_user_mail_account',
+      '*',
+      'id = ? AND userId = ? AND status = ?',
+      [mailAccountId, userId, 'CONNECTED']
+    );
+    if (!account) throw new AppError('Mail account not found or not connected', 404);
+
+    const mode = input.mode || (batch.sendMode === 'CREATE_DRAFTS' ? 'CREATE_DRAFTS' : 'SEND_NOW');
+    if (mode === 'SEND_NOW' && input.confirmSendCount !== failed.length) {
+      throw new AppError(
+        `Retry send-now requires confirmSendCount=${failed.length} (exact failed recipient count).`,
+        400
+      );
+    }
+
+    const ids = failed.map((e: any) => e.id as string);
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      await db.execute(
+        `UPDATE tbl_letter_batch_employee SET sendStatus = 'PENDING'
+          WHERE id IN (${chunk.map(() => '?').join(',')})`,
+        chunk
+      );
+    }
+
+    const subject = input.subject || `Your letter from organization`;
+    const bodyHtml =
+      input.bodyHtml ||
+      `<p>Please find your letter attached.</p><p>This message was sent from your connected ${account.provider} account.</p>`;
+
+    await orgScope.update(
+      organizationId,
+      'tbl_letter_batch',
+      { sendMode: mode, status: 'SENDING' },
+      'id = ?',
+      [batchId]
+    );
+
+    await writeLetterAudit(organizationId, userId, 'BATCH_SEND_RETRY_FAILED', 'letter_batch', batchId, {
+      retryCount: ids.length,
+      mode,
+    });
+
+    const chunkSize = 20;
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      await enqueueLetterSend(
+        {
+          batchId,
+          organizationId,
+          employeeIds: ids.slice(i, i + chunkSize),
+          mode,
+          subject,
+          bodyHtml,
+          userId,
+          mailAccountId: account.id,
+        },
+        Math.floor(i / chunkSize)
+      );
+    }
+
+    return { queued: ids.length, mode, provider: account.provider, from: account.emailAddress };
+  },
 };
