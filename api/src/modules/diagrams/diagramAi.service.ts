@@ -22,27 +22,29 @@ import crypto from 'crypto';
 
 const AI_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
-const DIAGRAM_AI_OPTS = { maxTokens: 3000, jsonMode: true, timeoutMs: 60_000 } as const;
-const DIAGRAM_AI_REPAIR_OPTS = { maxTokens: 3000, jsonMode: true, timeoutMs: 45_000 } as const;
+const DIAGRAM_AI_OPTS = { maxTokens: 4000, jsonMode: true, timeoutMs: 60_000 } as const;
+const DIAGRAM_AI_REPAIR_OPTS = { maxTokens: 4000, jsonMode: true, timeoutMs: 45_000 } as const;
 
 const GENERATE_SYSTEM = `You generate diagrams. Return ONLY JSON (no markdown):
 {"version":2,"pages":[{"id":"<uuid>","name":"Page-1","nodes":[{"id":"<uuid>","label":"...","shape":"rectangle|rounded|ellipse|diamond|hexagon|cylinder","x":number,"y":number,"w":number,"h":number,"kind":"shape"}],"edges":[{"id":"<uuid>","source":"<nodeId>","target":"<nodeId>","label":""}]}],"settings":{"grid":true,"gridSize":10,"pageView":true,"background":"#ffffff","theme":"automatic","paper":"a4-portrait","pageWidth":794,"pageHeight":1123}}
 Rules: prefer 6-20 nodes; unique ids; edges reference existing nodes; space nodes ~160px apart; for ER diagrams use rectangle=entity, diamond=relationship, ellipse=attribute; keep output compact.`;
 
-const EDIT_SYSTEM = `You edit the CURRENT diagram page only (you cannot create new pages).
-Return ONLY a JSON object: {"ops":[ ... ]}
-Allowed ops:
-- {"op":"addNode","node":{"id":"<uuid>","label":"...","shape":"rectangle|rounded|ellipse|diamond|hexagon|cylinder","x":number,"y":number,"w":number,"h":number,"kind":"shape"}}
-- {"op":"updateNode","id":"<existing>","changes":{label?,shape?,x?,y?,w?,h?}}
-- {"op":"removeNode","id":"<existing>"}
-- {"op":"addEdge","edge":{"id":"<uuid>","source":"<nodeId>","target":"<nodeId>","label":""}}
-- {"op":"updateEdge","id":"<existing>","changes":{source?,target?,label?}}
-- {"op":"removeEdge","id":"<existing>"}
-- {"op":"relabel","id":"<existing>","label":"..."}
-Rules: always wrap in {"ops":[...]}; use existing node ids from the page JSON; give new nodes/edges new uuid ids; place new nodes in empty space; if asked to "add a page/section", add nodes+edges on this page instead. No markdown. Prefer few ops. Omit style unless needed.`;
+/** Prefer full-page JSON — much more reliable than patch ops with jsonMode. */
+const EDIT_SYSTEM = `You edit the CURRENT diagram page. Return ONLY the full updated page as JSON:
+{"id":"<keep>","name":"<keep or update>","nodes":[{"id":"<uuid>","label":"...","shape":"rectangle|rounded|ellipse|diamond|hexagon|cylinder","x":number,"y":number,"w":number,"h":number,"kind":"shape"}],"edges":[{"id":"<uuid>","source":"<nodeId>","target":"<nodeId>","label":""}]}
+Rules:
+- Keep the same page id.
+- Keep existing node/edge ids when those elements stay; new elements need new uuid ids.
+- Apply the instruction (add/remove/rename/reconnect shapes).
+- If asked to "add a page/section/sheet", add the requested shapes+edges ON THIS page (do not invent pages).
+- Prefer 4-24 nodes; space ~160px apart; ER: rectangle=entity, diamond=relationship, ellipse=attribute.
+- No markdown, no ops/patches wrapper, no settings document.`;
 
 const REPAIR_DOC_SYSTEM =
   'Fix into valid DiagramDocument JSON only: {"version":2,"pages":[...],"settings":{...}}. No markdown.';
+
+const REPAIR_PAGE_SYSTEM =
+  'Fix into a valid diagram page JSON only: {"id":"...","name":"...","nodes":[...],"edges":[...]}. No markdown, no ops array.';
 
 const REPAIR_PATCH_SYSTEM =
   'Convert into valid {"ops":[...]} using only addNode/updateNode/removeNode/addEdge/updateEdge/removeEdge/relabel. Each addNode must nest fields under "node"; each addEdge under "edge". No markdown.';
@@ -354,15 +356,36 @@ function tryParseAsEditedPage(raw: string, current: DiagramPage): DiagramPage | 
       pageRaw = pages[0] ?? null;
     } else if (looksLikePage(parsed)) {
       pageRaw = parsed;
+    } else if (parsed && typeof parsed === 'object') {
+      const obj = parsed as Record<string, unknown>;
+      for (const key of ['page', 'result', 'data', 'diagram']) {
+        const inner = obj[key];
+        if (looksLikePage(inner)) {
+          pageRaw = inner;
+          break;
+        }
+        if (looksLikeDocument(inner)) {
+          pageRaw = (inner as { pages: unknown[] }).pages[0] ?? null;
+          break;
+        }
+      }
+      // { ops: [...], page: {...} } already handled; also accept nodes at top via wrapper miss
+      if (!pageRaw && Array.isArray(obj.nodes)) pageRaw = obj;
     }
     if (!pageRaw) return null;
     const normalized = normalizeAiPage(pageRaw, 0);
+    // Reject total wipe of a non-empty page (likely truncated/bad output)
+    if (current.nodes.length > 0 && normalized.nodes.length === 0) return null;
     return diagramPageSchema.parse({
       ...normalized,
       id: current.id,
       name: current.name || normalized.name,
     });
-  } catch {
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err), preview: String(raw).slice(0, 300) },
+      'Diagram AI could not parse edited page'
+    );
     return null;
   }
 }
@@ -518,6 +541,12 @@ function resolveEditResult(
   raw: string,
   current: DiagramPage
 ): { patch: DiagramPatchOp[]; page: DiagramPage } | null {
+  // Prefer full page / document (primary edit contract).
+  const asPage = tryParseAsEditedPage(raw, current);
+  if (asPage && (asPage.nodes.length > 0 || current.nodes.length === 0)) {
+    return { patch: [], page: asPage };
+  }
+  // Legacy / alternate: patch ops
   try {
     const patch = parseAndValidatePatches(raw);
     const page = diagramPageSchema.parse(applyPatches(current, patch));
@@ -525,8 +554,8 @@ function resolveEditResult(
   } catch {
     /* fall through */
   }
-  const page = tryParseAsEditedPage(raw, current);
-  if (page) return { patch: [], page };
+  // Accept empty-ish page only if model clearly returned a page object
+  if (asPage) return { patch: [], page: asPage };
   return null;
 }
 
@@ -616,15 +645,15 @@ export const diagramAiService = {
         let resolved = resolveEditResult(first.text, validatedPage);
         if (!resolved) {
           logger.warn(
-            { userId, preview: first.text.slice(0, 400) },
-            'Diagram AI edit first response invalid; repairing'
+            { userId, preview: first.text.slice(0, 500) },
+            'Diagram AI edit first response invalid; repairing as page'
           );
           const repair = await provider.complete(
             [
-              { role: 'system', content: REPAIR_PATCH_SYSTEM },
+              { role: 'system', content: REPAIR_PAGE_SYSTEM },
               {
                 role: 'user',
-                content: `Instruction: ${instruction}\n\nBroken model output:\n${first.text.slice(0, 6000)}`,
+                content: `Instruction: ${instruction}\n\nCurrent page:\n${JSON.stringify(slim)}\n\nBroken model output:\n${first.text.slice(0, 6000)}\n\nReturn the full corrected page JSON.`,
               },
             ],
             DIAGRAM_AI_REPAIR_OPTS
@@ -632,11 +661,17 @@ export const diagramAiService = {
           resolved = resolveEditResult(repair.text, validatedPage);
         }
         if (!resolved) {
-          throw new AppError('AI could not produce a valid diagram patch', 422);
+          throw new AppError('AI could not update the diagram page. Try a simpler edit.', 422);
         }
 
         logger.info(
-          { userId, model: env.AI_MODEL, ops: resolved.patch.length },
+          {
+            userId,
+            model: env.AI_MODEL,
+            ops: resolved.patch.length,
+            nodes: resolved.page.nodes.length,
+            edges: resolved.page.edges.length,
+          },
           'Diagram AI edit'
         );
         return resolved;
