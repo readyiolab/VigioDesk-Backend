@@ -1,5 +1,5 @@
 import type { PoolConnection } from 'mysql2/promise';
-import { ensureIndex } from './ddl';
+import { ensureColumn, ensureIndex } from './ddl';
 
 export async function initializeDiagramSchema(conn: PoolConnection): Promise<void> {
   await conn.query(`
@@ -9,10 +9,19 @@ export async function initializeDiagramSchema(conn: PoolConnection): Promise<voi
       name VARCHAR(255) NOT NULL,
       createdBy VARCHAR(255) NOT NULL,
       createdAt DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+      updatedAt DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
       FOREIGN KEY (organizationId) REFERENCES tbl_organization(id) ON DELETE CASCADE,
       FOREIGN KEY (createdBy) REFERENCES tbl_user(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
+
+  // Existing DBs created before updatedAt existed — add column before indexing it.
+  await ensureColumn(
+    conn,
+    'tbl_diagram_folder',
+    'updatedAt',
+    'DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) AFTER createdAt'
+  );
 
   await conn.query(`
     CREATE TABLE IF NOT EXISTS tbl_diagram (
