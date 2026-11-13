@@ -22,59 +22,15 @@ import crypto from 'crypto';
 
 const AI_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
-const DIAGRAM_AI_OPTS = { maxTokens: 4096, jsonMode: true, timeoutMs: 120_000 } as const;
+const DIAGRAM_AI_OPTS = { maxTokens: 3000, jsonMode: true, timeoutMs: 60_000 } as const;
+const DIAGRAM_AI_REPAIR_OPTS = { maxTokens: 3000, jsonMode: true, timeoutMs: 45_000 } as const;
 
-const GENERATE_SYSTEM = `You are a diagram generation assistant for PDFPRODUCT.
-Return ONLY a single JSON object matching this DiagramDocument schema (no markdown, no commentary):
-{
-  "version": 2,
-  "pages": [
-    {
-      "id": "<uuid>",
-      "name": "Page-1",
-      "nodes": [
-        {
-          "id": "<uuid>",
-          "label": "string",
-          "shape": "rectangle|rounded|ellipse|diamond|hexagon|cylinder|...",
-          "x": number, "y": number, "w": number, "h": number,
-          "kind": "shape",
-          "style": { "fill"?, "stroke"?, "fontSize"?, ... }
-        }
-      ],
-      "edges": [
-        {
-          "id": "<uuid>",
-          "source": "<nodeId>",
-          "target": "<nodeId>",
-          "label"?: "string",
-          "style"?: { "arrow"?: "classic|block|open|oval|diamond|none", ... }
-        }
-      ]
-    }
-  ],
-  "settings": {
-    "grid": true,
-    "gridSize": 10,
-    "pageView": true,
-    "background": "#ffffff",
-    "connectionArrows": true,
-    "connectionPoints": true,
-    "guides": true,
-    "paper": "a4-portrait",
-    "pageWidth": 794,
-    "pageHeight": 1123,
-    "theme": "automatic"
-  }
-}
-Rules:
-- version must be 1 or 2 (prefer 2)
-- at least one page with unique node/edge ids
-- place nodes with sensible spacing (avoid overlap)
-- edges must reference existing node ids
-- output JSON only`;
+const GENERATE_SYSTEM = `You generate diagrams. Return ONLY JSON (no markdown):
+{"version":2,"pages":[{"id":"<uuid>","name":"Page-1","nodes":[{"id":"<uuid>","label":"...","shape":"rectangle|rounded|ellipse|diamond|hexagon|cylinder","x":number,"y":number,"w":number,"h":number,"kind":"shape"}],"edges":[{"id":"<uuid>","source":"<nodeId>","target":"<nodeId>","label":""}]}],"settings":{"grid":true,"gridSize":10,"pageView":true,"background":"#ffffff","theme":"automatic","paper":"a4-portrait","pageWidth":794,"pageHeight":1123}}
+Rules: prefer 6-20 nodes; unique ids; edges reference existing nodes; space nodes ~160px apart; for ER diagrams use rectangle=entity, diamond=relationship, ellipse=attribute; keep output compact.`;
 
-const EDIT_SYSTEM = `You edit a single diagram page. Return ONLY a JSON array of patch operations.
+const EDIT_SYSTEM = `You edit a diagram page. Return ONLY a JSON object:
+{"ops":[ ...patch operations... ]}
 Allowed ops (discriminated by "op"):
 - {"op":"addNode","node":{id,label,shape,x,y,w,h,kind?,style?}}
 - {"op":"updateNode","id":"...","changes":{label?,shape?,x?,y?,w?,h?,style?}}
@@ -83,13 +39,13 @@ Allowed ops (discriminated by "op"):
 - {"op":"updateEdge","id":"...","changes":{source?,target?,label?,style?}}
 - {"op":"removeEdge","id":"..."}
 - {"op":"relabel","id":"...","label":"..."}
-No markdown, no commentary — JSON array only.`;
+No markdown. Prefer few ops. Always wrap ops in {"ops":[...]}.`;
 
 const REPAIR_DOC_SYSTEM =
-  'Fix the following into valid DiagramDocument JSON only. Shape: {"version":1|2,"pages":[...],"settings":{...}}. No markdown.';
+  'Fix into valid DiagramDocument JSON only: {"version":2,"pages":[...],"settings":{...}}. No markdown.';
 
 const REPAIR_PATCH_SYSTEM =
-  'Fix the following into a valid JSON array of diagram patch ops only. No markdown.';
+  'Fix into valid JSON object {"ops":[...]} of diagram patch ops only. No markdown.';
 
 /** Atomic monthly-credit reservation — same guarded UPDATE as ai.service. */
 async function reserveAiCredit(userId: string, limit: number, plan: Plan): Promise<void> {
@@ -172,33 +128,63 @@ function applyPatches(page: DiagramPage, ops: DiagramPatchOp[]): DiagramPage {
 function normalizeAiDocument(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object') return raw;
   const doc = raw as Record<string, unknown>;
-  const pages = Array.isArray(doc.pages) ? doc.pages : [];
-  const settings =
-    doc.settings && typeof doc.settings === 'object'
-      ? { ...(doc.settings as Record<string, unknown>) }
-      : {};
+  // Common wrappers: { document }, { diagram }, { result }
+  const unwrapped =
+    doc.pages
+      ? doc
+      : doc.document && typeof doc.document === 'object'
+        ? (doc.document as Record<string, unknown>)
+        : doc.diagram && typeof doc.diagram === 'object'
+          ? (doc.diagram as Record<string, unknown>)
+          : doc;
+  const pages = Array.isArray(unwrapped.pages) ? unwrapped.pages : [];
+  const settings: Record<string, unknown> =
+    unwrapped.settings && typeof unwrapped.settings === 'object'
+      ? { ...(unwrapped.settings as Record<string, unknown>) }
+      : {
+          grid: true,
+          gridSize: 10,
+          pageView: true,
+          background: '#ffffff',
+          theme: 'automatic',
+          paper: 'a4-portrait',
+          pageWidth: 794,
+          pageHeight: 1123,
+        };
 
   const validThemes = new Set(['automatic', 'classic', 'simple', 'minimal', 'sketch', 'atlas']);
   if (typeof settings.theme === 'string' && !validThemes.has(settings.theme)) {
     settings.theme = 'automatic';
   }
+  if (settings.paper == null) settings.paper = 'a4-portrait';
+  if (settings.pageWidth == null) settings.pageWidth = 794;
+  if (settings.pageHeight == null) settings.pageHeight = 1123;
+
+  const normalizedPages = (pages.length ? pages : [{ name: 'Page-1', nodes: [], edges: [] }]).map(
+    (page, index) => normalizeAiPage(page, index)
+  );
 
   return {
-    version: doc.version === 1 ? 1 : 2,
-    pages: pages.map((page, index) => normalizeAiPage(page, index)),
+    version: unwrapped.version === 1 ? 1 : 2,
+    pages: normalizedPages,
     settings,
   };
 }
 
 function normalizeAiPage(raw: unknown, index: number) {
   const page = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-  const nodes = Array.isArray(page.nodes) ? page.nodes : [];
-  const edges = Array.isArray(page.edges) ? page.edges : [];
+  const nodesRaw = Array.isArray(page.nodes) ? page.nodes : [];
+  const edgesRaw = Array.isArray(page.edges) ? page.edges : [];
+  const nodes = nodesRaw.map(normalizeAiNode);
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const edges = edgesRaw
+    .map(normalizeAiEdge)
+    .filter((e) => e.source && e.target && nodeIds.has(e.source) && nodeIds.has(e.target));
   return {
     id: String(page.id || crypto.randomUUID()),
     name: String(page.name || `Page-${index + 1}`),
-    nodes: nodes.map(normalizeAiNode),
-    edges: edges.map(normalizeAiEdge),
+    nodes,
+    edges,
   };
 }
 
@@ -206,28 +192,101 @@ function normalizeAiNode(raw: unknown) {
   const node = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const w = Number(node.w);
   const h = Number(node.h);
+  const kind =
+    typeof node.kind === 'string' &&
+    ['shape', 'freehand', 'table', 'container', 'text'].includes(node.kind)
+      ? node.kind
+      : 'shape';
+  const style =
+    node.style && typeof node.style === 'object'
+      ? (node.style as Record<string, unknown>)
+      : undefined;
   return {
-    ...node,
     id: String(node.id || crypto.randomUUID()),
-    label: String(node.label ?? ''),
-    shape: String(node.shape ?? 'rectangle'),
+    label: String(node.label ?? node.name ?? ''),
+    shape: String(node.shape || node.type || 'rectangle'),
     x: Number.isFinite(Number(node.x)) ? Number(node.x) : 40,
     y: Number.isFinite(Number(node.y)) ? Number(node.y) : 40,
     w: Number.isFinite(w) && w > 0 ? w : 120,
     h: Number.isFinite(h) && h > 0 ? h : 60,
-    kind: node.kind ?? 'shape',
+    kind,
+    ...(style ? { style } : {}),
   };
 }
 
 function normalizeAiEdge(raw: unknown) {
   const edge = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const style =
+    edge.style && typeof edge.style === 'object'
+      ? (edge.style as Record<string, unknown>)
+      : undefined;
+  if (style?.arrow != null) {
+    const arrow = String(style.arrow);
+    const ok = ['classic', 'block', 'open', 'oval', 'diamond', 'none'];
+    if (!ok.includes(arrow)) delete style.arrow;
+  }
   return {
-    ...edge,
     id: String(edge.id || crypto.randomUUID()),
-    source: String(edge.source || ''),
-    target: String(edge.target || ''),
+    source: String(edge.source || edge.from || ''),
+    target: String(edge.target || edge.to || ''),
     label: edge.label != null ? String(edge.label) : '',
+    ...(style ? { style } : {}),
   };
+}
+
+/** Slim page for edit prompts — cuts tokens / latency. */
+function slimPageForAi(page: DiagramPage): unknown {
+  return {
+    id: page.id,
+    name: page.name,
+    nodes: page.nodes.map((n) => ({
+      id: n.id,
+      label: n.label,
+      shape: n.shape,
+      x: n.x,
+      y: n.y,
+      w: n.w,
+      h: n.h,
+      kind: n.kind ?? 'shape',
+    })),
+    edges: page.edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      label: e.label ?? '',
+    })),
+  };
+}
+
+function unwrapPatchOps(parsed: unknown): unknown[] {
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    for (const key of ['ops', 'patches', 'operations', 'changes', 'edits']) {
+      if (Array.isArray(obj[key])) return obj[key] as unknown[];
+    }
+  }
+  throw new AppError('AI returned an invalid patch payload', 422);
+}
+
+function normalizeAiPatchOp(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw;
+  const op = { ...(raw as Record<string, unknown>) };
+  if (op.op === 'addNode' && op.node) op.node = normalizeAiNode(op.node);
+  if (op.op === 'addEdge' && op.edge) op.edge = normalizeAiEdge(op.edge);
+  if (op.op === 'updateNode' && op.changes && typeof op.changes === 'object') {
+    const c = { ...(op.changes as Record<string, unknown>) };
+    if (c.w != null) {
+      const w = Number(c.w);
+      c.w = Number.isFinite(w) && w > 0 ? w : undefined;
+    }
+    if (c.h != null) {
+      const h = Number(c.h);
+      c.h = Number.isFinite(h) && h > 0 ? h : undefined;
+    }
+    op.changes = c;
+  }
+  return op;
 }
 
 function parseAndValidateDocument(raw: string): DiagramDocument {
@@ -238,11 +297,9 @@ function parseAndValidateDocument(raw: string): DiagramDocument {
 
 function parseAndValidatePatches(raw: string): DiagramPatchOp[] {
   const parsed = parseModelJson(raw);
-  if (!Array.isArray(parsed)) {
-    throw new AppError('AI returned an invalid patch payload', 422);
-  }
-  return parsed.map((op, i) => {
-    const result = diagramPatchOpSchema.safeParse(op);
+  const list = unwrapPatchOps(parsed);
+  return list.map((op, i) => {
+    const result = diagramPatchOpSchema.safeParse(normalizeAiPatchOp(op));
     if (!result.success) {
       throw new AppError(`Invalid patch op at index ${i}`, 422);
     }
@@ -288,7 +345,7 @@ export const diagramAiService = {
               { role: 'system', content: REPAIR_DOC_SYSTEM },
               { role: 'user', content: first.text },
             ],
-            DIAGRAM_AI_OPTS
+            DIAGRAM_AI_REPAIR_OPTS
           );
           try {
             document = parseAndValidateDocument(repair.text);
@@ -317,6 +374,7 @@ export const diagramAiService = {
     }
     const provider = getAiProvider();
     const validatedPage = diagramPageSchema.parse(page);
+    const slim = slimPageForAi(validatedPage);
 
     return withAiSlot('diagram', userId, 2, () =>
     withCredit(userId, plan, async () => {
@@ -326,7 +384,7 @@ export const diagramAiService = {
             { role: 'system', content: EDIT_SYSTEM },
             {
               role: 'user',
-              content: `Instruction: ${instruction}\n\nCurrent page JSON:\n${JSON.stringify(validatedPage)}`,
+              content: `Instruction: ${instruction}\n\nCurrent page JSON:\n${JSON.stringify(slim)}`,
             },
           ],
           DIAGRAM_AI_OPTS
@@ -341,7 +399,7 @@ export const diagramAiService = {
               { role: 'system', content: REPAIR_PATCH_SYSTEM },
               { role: 'user', content: first.text },
             ],
-            DIAGRAM_AI_OPTS
+            DIAGRAM_AI_REPAIR_OPTS
           );
           try {
             patch = parseAndValidatePatches(repair.text);
@@ -412,7 +470,7 @@ export const diagramAiService = {
               { role: 'system', content: REPAIR_DOC_SYSTEM },
               { role: 'user', content: first.text || JSON.stringify(emptyDocument()) },
             ],
-            DIAGRAM_AI_OPTS
+            DIAGRAM_AI_REPAIR_OPTS
           );
           try {
             document = parseAndValidateDocument(repair.text);
