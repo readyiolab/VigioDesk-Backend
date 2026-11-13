@@ -2,7 +2,12 @@ import { Router } from 'express';
 import { validate } from '../../middleware/validate.middleware';
 import { sharedDiagramWriteLimiter } from '../../middleware/rateLimit.middleware';
 import { diagramsController } from './diagrams.controller';
-import { sharedTokenSchema, sharedUpdateSchema } from './diagrams.types';
+import {
+  sharedTokenSchema,
+  sharedUpdateSchema,
+  sharedPresenceSchema,
+  sharedPresenceLeaveSchema,
+} from './diagrams.types';
 
 /**
  * PUBLIC diagram share routes — mounted at /api/diagrams/shared.
@@ -20,6 +25,22 @@ router.patch(
   sharedDiagramWriteLimiter,
   validate(sharedUpdateSchema as any),
   diagramsController.updateShared
+);
+router.get(
+  '/:token/presence',
+  validate(sharedTokenSchema as any),
+  diagramsController.presenceList
+);
+router.post(
+  '/:token/presence',
+  sharedDiagramWriteLimiter,
+  validate(sharedPresenceSchema as any),
+  diagramsController.presenceHeartbeat
+);
+router.post(
+  '/:token/presence/leave',
+  validate(sharedPresenceLeaveSchema as any),
+  diagramsController.presenceLeave
 );
 
 export default router;

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { diagramsService } from './diagrams.service';
 import { diagramAiService } from './diagramAi.service';
+import { leavePresence, listPresence, upsertPresence } from './diagramPresence';
 
 const listQuerySchema = z.object({
   folderId: z.string().optional(),
@@ -342,6 +343,36 @@ export const diagramsController = {
     try {
       const diagram = await diagramsService.updateByShareToken(req.params.token, req.body);
       res.json({ diagram });
+    } catch (e) {
+      next(e);
+    }
+  },
+
+  async presenceHeartbeat(req: Request, res: Response, next: NextFunction) {
+    try {
+      // Validate share exists / not revoked
+      await diagramsService.getByShareToken(req.params.token);
+      const peers = upsertPresence(req.params.token, req.body);
+      res.json({ peers });
+    } catch (e) {
+      next(e);
+    }
+  },
+
+  async presenceList(req: Request, res: Response, next: NextFunction) {
+    try {
+      await diagramsService.getByShareToken(req.params.token);
+      const exclude = typeof req.query.clientId === 'string' ? req.query.clientId : undefined;
+      res.json({ peers: listPresence(req.params.token, exclude) });
+    } catch (e) {
+      next(e);
+    }
+  },
+
+  async presenceLeave(req: Request, res: Response, next: NextFunction) {
+    try {
+      leavePresence(req.params.token, req.body.clientId);
+      res.json({ ok: true });
     } catch (e) {
       next(e);
     }

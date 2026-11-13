@@ -31,6 +31,11 @@ export const edgeStyleSchema = z.object({
   exitY: z.number().optional(),
   entryX: z.number().optional(),
   entryY: z.number().optional(),
+  exitPerimeter: z.boolean().optional(),
+  entryPerimeter: z.boolean().optional(),
+  floating: z.boolean().optional(),
+  jumpStyle: z.enum(['none', 'arc', 'gap', 'sharp']).optional(),
+  jumpSize: z.number().optional(),
   points: z.array(z.tuple([z.number(), z.number()])).optional(),
 });
 
@@ -70,6 +75,13 @@ export const containerSchema = z.object({
 
 export const nodeKindSchema = z.enum(['shape', 'freehand', 'table', 'container', 'text']);
 
+export const diagramLayerSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  visible: z.boolean().default(true),
+  locked: z.boolean().default(false),
+});
+
 export const diagramNodeSchema = z.object({
   id: z.string().min(1),
   label: z.string().default(''),
@@ -83,6 +95,7 @@ export const diagramNodeSchema = z.object({
   locked: z.boolean().optional(),
   hidden: z.boolean().optional(),
   groupId: z.string().optional(),
+  layerId: z.string().optional(),
   freehand: freehandSchema.optional(),
   table: tableSchema.optional(),
   container: containerSchema.optional(),
@@ -101,6 +114,8 @@ export const diagramPageSchema = z.object({
   name: z.string().min(1),
   nodes: z.array(diagramNodeSchema).default([]),
   edges: z.array(diagramEdgeSchema).default([]),
+  layers: z.array(diagramLayerSchema).optional(),
+  activeLayerId: z.string().optional(),
 });
 
 export const paperEnum = z.enum([
@@ -136,6 +151,7 @@ export const diagramDocumentSchema = z.object({
       background: z.string().optional(),
       connectionArrows: z.boolean().optional(),
       connectionPoints: z.boolean().optional(),
+      snapToPoint: z.boolean().optional(),
       guides: z.boolean().optional(),
       paper: paperEnum.optional(),
       pageWidth: z.number().optional(),
@@ -273,6 +289,26 @@ export const sharedUpdateSchema = z.object({
     .refine((b) => contentSizeOk(b.content), {
       message: 'Diagram content is too large (max ~2MB)',
     }),
+  query: emptyQuery,
+});
+
+export const sharedPresenceSchema = z.object({
+  params: z.object({ token: z.string().min(1) }),
+  body: z.object({
+    clientId: z.string().min(8).max(64),
+    name: z.string().max(40).optional(),
+    x: z.number(),
+    y: z.number(),
+    selectionIds: z.array(z.string()).max(50).optional(),
+  }),
+  query: emptyQuery,
+});
+
+export const sharedPresenceLeaveSchema = z.object({
+  params: z.object({ token: z.string().min(1) }),
+  body: z.object({
+    clientId: z.string().min(8).max(64),
+  }),
   query: emptyQuery,
 });
 
