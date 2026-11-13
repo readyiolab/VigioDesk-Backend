@@ -29,23 +29,23 @@ const GENERATE_SYSTEM = `You generate diagrams. Return ONLY JSON (no markdown):
 {"version":2,"pages":[{"id":"<uuid>","name":"Page-1","nodes":[{"id":"<uuid>","label":"...","shape":"rectangle|rounded|ellipse|diamond|hexagon|cylinder","x":number,"y":number,"w":number,"h":number,"kind":"shape"}],"edges":[{"id":"<uuid>","source":"<nodeId>","target":"<nodeId>","label":""}]}],"settings":{"grid":true,"gridSize":10,"pageView":true,"background":"#ffffff","theme":"automatic","paper":"a4-portrait","pageWidth":794,"pageHeight":1123}}
 Rules: prefer 6-20 nodes; unique ids; edges reference existing nodes; space nodes ~160px apart; for ER diagrams use rectangle=entity, diamond=relationship, ellipse=attribute; keep output compact.`;
 
-const EDIT_SYSTEM = `You edit a diagram page. Return ONLY a JSON object:
-{"ops":[ ...patch operations... ]}
-Allowed ops (discriminated by "op"):
-- {"op":"addNode","node":{id,label,shape,x,y,w,h,kind?,style?}}
-- {"op":"updateNode","id":"...","changes":{label?,shape?,x?,y?,w?,h?,style?}}
-- {"op":"removeNode","id":"..."}
-- {"op":"addEdge","edge":{id,source,target,label?,style?}}
-- {"op":"updateEdge","id":"...","changes":{source?,target?,label?,style?}}
-- {"op":"removeEdge","id":"..."}
-- {"op":"relabel","id":"...","label":"..."}
-No markdown. Prefer few ops. Always wrap ops in {"ops":[...]}.`;
+const EDIT_SYSTEM = `You edit the CURRENT diagram page only (you cannot create new pages).
+Return ONLY a JSON object: {"ops":[ ... ]}
+Allowed ops:
+- {"op":"addNode","node":{"id":"<uuid>","label":"...","shape":"rectangle|rounded|ellipse|diamond|hexagon|cylinder","x":number,"y":number,"w":number,"h":number,"kind":"shape"}}
+- {"op":"updateNode","id":"<existing>","changes":{label?,shape?,x?,y?,w?,h?}}
+- {"op":"removeNode","id":"<existing>"}
+- {"op":"addEdge","edge":{"id":"<uuid>","source":"<nodeId>","target":"<nodeId>","label":""}}
+- {"op":"updateEdge","id":"<existing>","changes":{source?,target?,label?}}
+- {"op":"removeEdge","id":"<existing>"}
+- {"op":"relabel","id":"<existing>","label":"..."}
+Rules: always wrap in {"ops":[...]}; use existing node ids from the page JSON; give new nodes/edges new uuid ids; place new nodes in empty space; if asked to "add a page/section", add nodes+edges on this page instead. No markdown. Prefer few ops. Omit style unless needed.`;
 
 const REPAIR_DOC_SYSTEM =
   'Fix into valid DiagramDocument JSON only: {"version":2,"pages":[...],"settings":{...}}. No markdown.';
 
 const REPAIR_PATCH_SYSTEM =
-  'Fix into valid JSON object {"ops":[...]} of diagram patch ops only. No markdown.';
+  'Convert into valid {"ops":[...]} using only addNode/updateNode/removeNode/addEdge/updateEdge/removeEdge/relabel. Each addNode must nest fields under "node"; each addEdge under "edge". No markdown.';
 
 /** Atomic monthly-credit reservation — same guarded UPDATE as ai.service. */
 async function reserveAiCredit(userId: string, limit: number, plan: Plan): Promise<void> {
@@ -188,6 +188,59 @@ function normalizeAiPage(raw: unknown, index: number) {
   };
 }
 
+function sanitizeNodeStyle(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const s = { ...(raw as Record<string, unknown>) };
+  for (const key of ['strokeWidth', 'fontSize', 'fontStyle', 'opacity', 'rotation'] as const) {
+    if (s[key] != null) {
+      const n = Number(s[key]);
+      if (!Number.isFinite(n)) delete s[key];
+      else s[key] = n;
+    }
+  }
+  for (const key of ['dashed', 'rounded', 'shadow'] as const) {
+    if (s[key] != null && typeof s[key] !== 'boolean') delete s[key];
+  }
+  return s;
+}
+
+function sanitizeEdgeStyle(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const s = { ...(raw as Record<string, unknown>) };
+  const arrowOk = new Set(['classic', 'block', 'open', 'oval', 'diamond', 'none']);
+  const edgeOk = new Set(['orthogonal', 'straight', 'entityRelation', 'elbow']);
+  const jumpOk = new Set(['none', 'arc', 'gap', 'sharp']);
+  for (const key of ['arrow', 'startArrow'] as const) {
+    if (s[key] != null && !arrowOk.has(String(s[key]))) delete s[key];
+  }
+  if (s.edgeStyle != null && !edgeOk.has(String(s.edgeStyle))) delete s.edgeStyle;
+  if (s.jumpStyle != null && !jumpOk.has(String(s.jumpStyle))) delete s.jumpStyle;
+  for (const key of ['strokeWidth', 'fontSize', 'exitX', 'exitY', 'entryX', 'entryY', 'jumpSize'] as const) {
+    if (s[key] != null) {
+      const n = Number(s[key]);
+      if (!Number.isFinite(n)) delete s[key];
+      else s[key] = n;
+    }
+  }
+  for (const key of ['dashed', 'curved', 'exitPerimeter', 'entryPerimeter', 'floating'] as const) {
+    if (s[key] != null && typeof s[key] !== 'boolean') delete s[key];
+  }
+  if (Array.isArray(s.points)) {
+    const pts = (s.points as unknown[])
+      .map((p) => {
+        if (!Array.isArray(p) || p.length < 2) return null;
+        const x = Number(p[0]);
+        const y = Number(p[1]);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return [x, y] as [number, number];
+      })
+      .filter((p): p is [number, number] => p != null);
+    if (pts.length) s.points = pts;
+    else delete s.points;
+  }
+  return s;
+}
+
 function normalizeAiNode(raw: unknown) {
   const node = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const w = Number(node.w);
@@ -197,10 +250,7 @@ function normalizeAiNode(raw: unknown) {
     ['shape', 'freehand', 'table', 'container', 'text'].includes(node.kind)
       ? node.kind
       : 'shape';
-  const style =
-    node.style && typeof node.style === 'object'
-      ? (node.style as Record<string, unknown>)
-      : undefined;
+  const style = sanitizeNodeStyle(node.style);
   return {
     id: String(node.id || crypto.randomUUID()),
     label: String(node.label ?? node.name ?? ''),
@@ -216,15 +266,7 @@ function normalizeAiNode(raw: unknown) {
 
 function normalizeAiEdge(raw: unknown) {
   const edge = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-  const style =
-    edge.style && typeof edge.style === 'object'
-      ? (edge.style as Record<string, unknown>)
-      : undefined;
-  if (style?.arrow != null) {
-    const arrow = String(style.arrow);
-    const ok = ['classic', 'block', 'open', 'oval', 'diamond', 'none'];
-    if (!ok.includes(arrow)) delete style.arrow;
-  }
+  const style = sanitizeEdgeStyle(edge.style);
   return {
     id: String(edge.id || crypto.randomUUID()),
     source: String(edge.source || edge.from || ''),
@@ -258,7 +300,32 @@ function slimPageForAi(page: DiagramPage): unknown {
   };
 }
 
-function unwrapPatchOps(parsed: unknown): unknown[] {
+const OP_ALIASES: Record<string, string> = {
+  addnode: 'addNode',
+  add_node: 'addNode',
+  createnode: 'addNode',
+  create_node: 'addNode',
+  updatenode: 'updateNode',
+  update_node: 'updateNode',
+  removenode: 'removeNode',
+  remove_node: 'removeNode',
+  deletenode: 'removeNode',
+  delete_node: 'removeNode',
+  addedge: 'addEdge',
+  add_edge: 'addEdge',
+  createedge: 'addEdge',
+  create_edge: 'addEdge',
+  updateedge: 'updateEdge',
+  update_edge: 'updateEdge',
+  removeedge: 'removeEdge',
+  remove_edge: 'removeEdge',
+  deleteedge: 'removeEdge',
+  delete_edge: 'removeEdge',
+  relabel: 'relabel',
+  rename: 'relabel',
+};
+
+function unwrapPatchOps(parsed: unknown): unknown[] | null {
   if (Array.isArray(parsed)) return parsed;
   if (parsed && typeof parsed === 'object') {
     const obj = parsed as Record<string, unknown>;
@@ -266,27 +333,154 @@ function unwrapPatchOps(parsed: unknown): unknown[] {
       if (Array.isArray(obj[key])) return obj[key] as unknown[];
     }
   }
-  throw new AppError('AI returned an invalid patch payload', 422);
+  return null;
 }
 
-function normalizeAiPatchOp(raw: unknown): unknown {
-  if (!raw || typeof raw !== 'object') return raw;
-  const op = { ...(raw as Record<string, unknown>) };
-  if (op.op === 'addNode' && op.node) op.node = normalizeAiNode(op.node);
-  if (op.op === 'addEdge' && op.edge) op.edge = normalizeAiEdge(op.edge);
-  if (op.op === 'updateNode' && op.changes && typeof op.changes === 'object') {
-    const c = { ...(op.changes as Record<string, unknown>) };
-    if (c.w != null) {
-      const w = Number(c.w);
-      c.w = Number.isFinite(w) && w > 0 ? w : undefined;
+function looksLikePage(raw: unknown): boolean {
+  return Boolean(raw && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>).nodes));
+}
+
+function looksLikeDocument(raw: unknown): boolean {
+  return Boolean(raw && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>).pages));
+}
+
+/** When the model returns a full page/document instead of patches. */
+function tryParseAsEditedPage(raw: string, current: DiagramPage): DiagramPage | null {
+  try {
+    const parsed = parseModelJson(raw);
+    let pageRaw: unknown = null;
+    if (looksLikeDocument(parsed)) {
+      const pages = (parsed as { pages: unknown[] }).pages;
+      pageRaw = pages[0] ?? null;
+    } else if (looksLikePage(parsed)) {
+      pageRaw = parsed;
     }
-    if (c.h != null) {
-      const h = Number(c.h);
-      c.h = Number.isFinite(h) && h > 0 ? h : undefined;
-    }
-    op.changes = c;
+    if (!pageRaw) return null;
+    const normalized = normalizeAiPage(pageRaw, 0);
+    return diagramPageSchema.parse({
+      ...normalized,
+      id: current.id,
+      name: current.name || normalized.name,
+    });
+  } catch {
+    return null;
   }
-  return op;
+}
+
+function normalizeAiPatchOp(raw: unknown): unknown | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const src = raw as Record<string, unknown>;
+  const opKey = String(src.op ?? src.action ?? src.type ?? '')
+    .trim()
+    .replace(/[\s-]+/g, '_');
+  const opName = OP_ALIASES[opKey.toLowerCase()] ?? (opKey || null);
+  if (!opName) return null;
+
+  if (opName === 'addNode') {
+    const nodeRaw =
+      src.node && typeof src.node === 'object'
+        ? src.node
+        : (() => {
+            const { op: _o, action: _a, type: _t, node: _n, ...rest } = src;
+            return rest;
+          })();
+    return { op: 'addNode', node: normalizeAiNode(nodeRaw) };
+  }
+
+  if (opName === 'addEdge') {
+    const edgeRaw =
+      src.edge && typeof src.edge === 'object'
+        ? src.edge
+        : (() => {
+            const { op: _o, action: _a, type: _t, edge: _e, ...rest } = src;
+            return rest;
+          })();
+    const edge = normalizeAiEdge(edgeRaw);
+    if (!edge.source || !edge.target) return null;
+    return { op: 'addEdge', edge };
+  }
+
+  if (opName === 'updateNode') {
+    const id = String(src.id ?? '');
+    if (!id) return null;
+    const changesRaw =
+      src.changes && typeof src.changes === 'object'
+        ? { ...(src.changes as Record<string, unknown>) }
+        : (() => {
+            const { op: _o, action: _a, type: _t, id: _i, changes: _c, ...rest } = src;
+            return rest;
+          })();
+    delete changesRaw.id;
+    if (changesRaw.w != null) {
+      const w = Number(changesRaw.w);
+      if (!Number.isFinite(w) || w <= 0) delete changesRaw.w;
+      else changesRaw.w = w;
+    }
+    if (changesRaw.h != null) {
+      const h = Number(changesRaw.h);
+      if (!Number.isFinite(h) || h <= 0) delete changesRaw.h;
+      else changesRaw.h = h;
+    }
+    for (const key of ['x', 'y'] as const) {
+      if (changesRaw[key] != null) {
+        const n = Number(changesRaw[key]);
+        if (!Number.isFinite(n)) delete changesRaw[key];
+        else changesRaw[key] = n;
+      }
+    }
+    if (changesRaw.style) {
+      const style = sanitizeNodeStyle(changesRaw.style);
+      if (style) changesRaw.style = style;
+      else delete changesRaw.style;
+    }
+    if (changesRaw.label != null) changesRaw.label = String(changesRaw.label);
+    if (changesRaw.shape != null) changesRaw.shape = String(changesRaw.shape);
+    return { op: 'updateNode', id, changes: changesRaw };
+  }
+
+  if (opName === 'updateEdge') {
+    const id = String(src.id ?? '');
+    if (!id) return null;
+    const changesRaw =
+      src.changes && typeof src.changes === 'object'
+        ? { ...(src.changes as Record<string, unknown>) }
+        : (() => {
+            const { op: _o, action: _a, type: _t, id: _i, changes: _c, ...rest } = src;
+            return rest;
+          })();
+    delete changesRaw.id;
+    if (changesRaw.source != null) changesRaw.source = String(changesRaw.source || changesRaw.from || '');
+    if (changesRaw.target != null) changesRaw.target = String(changesRaw.target || changesRaw.to || '');
+    if (changesRaw.from != null) {
+      changesRaw.source = String(changesRaw.from);
+      delete changesRaw.from;
+    }
+    if (changesRaw.to != null) {
+      changesRaw.target = String(changesRaw.to);
+      delete changesRaw.to;
+    }
+    if (changesRaw.label != null) changesRaw.label = String(changesRaw.label);
+    if (changesRaw.style) {
+      const style = sanitizeEdgeStyle(changesRaw.style);
+      if (style) changesRaw.style = style;
+      else delete changesRaw.style;
+    }
+    return { op: 'updateEdge', id, changes: changesRaw };
+  }
+
+  if (opName === 'removeNode' || opName === 'removeEdge') {
+    const id = String(src.id ?? '');
+    if (!id) return null;
+    return { op: opName, id };
+  }
+
+  if (opName === 'relabel') {
+    const id = String(src.id ?? '');
+    if (!id) return null;
+    return { op: 'relabel', id, label: String(src.label ?? '') };
+  }
+
+  return null;
 }
 
 function parseAndValidateDocument(raw: string): DiagramDocument {
@@ -298,13 +492,42 @@ function parseAndValidateDocument(raw: string): DiagramDocument {
 function parseAndValidatePatches(raw: string): DiagramPatchOp[] {
   const parsed = parseModelJson(raw);
   const list = unwrapPatchOps(parsed);
-  return list.map((op, i) => {
-    const result = diagramPatchOpSchema.safeParse(normalizeAiPatchOp(op));
-    if (!result.success) {
-      throw new AppError(`Invalid patch op at index ${i}`, 422);
+  if (!list) {
+    throw new AppError('AI returned an invalid patch payload', 422);
+  }
+  const ops: DiagramPatchOp[] = [];
+  for (let i = 0; i < list.length; i++) {
+    const normalized = normalizeAiPatchOp(list[i]);
+    const result = diagramPatchOpSchema.safeParse(normalized);
+    if (result.success) {
+      ops.push(result.data);
+    } else {
+      logger.warn(
+        { index: i, issues: result.error.issues.slice(0, 4), preview: JSON.stringify(list[i]).slice(0, 240) },
+        'Diagram AI skipped invalid patch op'
+      );
     }
-    return result.data;
-  });
+  }
+  if (!ops.length) {
+    throw new AppError('AI returned an invalid patch payload', 422);
+  }
+  return ops;
+}
+
+function resolveEditResult(
+  raw: string,
+  current: DiagramPage
+): { patch: DiagramPatchOp[]; page: DiagramPage } | null {
+  try {
+    const patch = parseAndValidatePatches(raw);
+    const page = diagramPageSchema.parse(applyPatches(current, patch));
+    return { patch, page };
+  } catch {
+    /* fall through */
+  }
+  const page = tryParseAsEditedPage(raw, current);
+  if (page) return { patch: [], page };
+  return null;
 }
 
 async function withCredit<T>(userId: string, plan: Plan, fn: () => Promise<T>): Promise<T> {
@@ -390,30 +613,33 @@ export const diagramAiService = {
           DIAGRAM_AI_OPTS
         );
 
-        let patch: DiagramPatchOp[];
-        try {
-          patch = parseAndValidatePatches(first.text);
-        } catch {
+        let resolved = resolveEditResult(first.text, validatedPage);
+        if (!resolved) {
+          logger.warn(
+            { userId, preview: first.text.slice(0, 400) },
+            'Diagram AI edit first response invalid; repairing'
+          );
           const repair = await provider.complete(
             [
               { role: 'system', content: REPAIR_PATCH_SYSTEM },
-              { role: 'user', content: first.text },
+              {
+                role: 'user',
+                content: `Instruction: ${instruction}\n\nBroken model output:\n${first.text.slice(0, 6000)}`,
+              },
             ],
             DIAGRAM_AI_REPAIR_OPTS
           );
-          try {
-            patch = parseAndValidatePatches(repair.text);
-          } catch {
-            throw new AppError('AI could not produce a valid diagram patch', 422);
-          }
+          resolved = resolveEditResult(repair.text, validatedPage);
+        }
+        if (!resolved) {
+          throw new AppError('AI could not produce a valid diagram patch', 422);
         }
 
-        const nextPage = diagramPageSchema.parse(applyPatches(validatedPage, patch));
         logger.info(
-          { userId, model: env.AI_MODEL, ops: patch.length },
+          { userId, model: env.AI_MODEL, ops: resolved.patch.length },
           'Diagram AI edit'
         );
-        return { patch, page: nextPage };
+        return resolved;
       } catch (err) {
         if (err instanceof AppError) throw err;
         logger.error({ err, userId }, 'Diagram AI edit failed');
