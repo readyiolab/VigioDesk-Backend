@@ -33,6 +33,23 @@ export type ProductWorkersResult = {
 };
 
 /**
+ * Letter/sign code imported from api/dist uses the API `db` singleton.
+ * The worker's own mysql pool does not initialize that module — connect it here
+ * (no DDL; schema is owned by the API process).
+ */
+async function ensureApiMysqlPool(): Promise<void> {
+  const mysqlMod = await importApiModule<{
+    db: {
+      connect: (options?: { onReady?: (pool: unknown) => Promise<void> }) => Promise<unknown>;
+      isConnected: boolean;
+    };
+  }>('mysql.js');
+  if (mysqlMod.db.isConnected) return;
+  await mysqlMod.db.connect();
+  logger.info('Worker process: API MySQL pool ready for letter/sign consumers');
+}
+
+/**
  * Starts letter generate/send + sign-finalize consumers in the worker process.
  * Used when API has INLINE_LETTER_SIGN_WORKERS=false.
  */
@@ -40,6 +57,20 @@ export async function startProductWorkersFromApi(): Promise<ProductWorkersResult
   const stops: Array<() => Promise<void>> = [];
   let letterWorkersOk = false;
   let signWorkersOk = false;
+
+  try {
+    await ensureApiMysqlPool();
+  } catch (err) {
+    logger.error(
+      { err },
+      'Failed to init API MySQL pool in worker — letter PDF jobs will fail with "pool has not been initialized"'
+    );
+    return {
+      letterWorkersOk: false,
+      signWorkersOk: false,
+      stop: async () => undefined,
+    };
+  }
 
   try {
     const letterMod = await importApiModule<{
