@@ -7,6 +7,7 @@ import { asPlan } from '../../lib/storage';
 import type { Plan } from '../../../../shared/types';
 import { getAiProvider, isAiConfigured } from '../../lib/ai/provider';
 import { toAiAppError } from '../../lib/ai/errors';
+import { withAiSlot } from '../../lib/aiSemaphore';
 import { parseModelJson } from '../letters/parseModelJson';
 import {
   diagramDocumentSchema,
@@ -267,7 +268,8 @@ export const diagramAiService = {
     }
     const provider = getAiProvider();
 
-    return withCredit(userId, plan, async () => {
+    return withAiSlot('diagram', userId, 2, () =>
+    withCredit(userId, plan, async () => {
       try {
         const first = await provider.complete(
           [
@@ -305,7 +307,8 @@ export const diagramAiService = {
         logger.error({ err, userId }, 'Diagram AI generate failed');
         throw toAiAppError(err);
       }
-    });
+    })
+    );
   },
 
   async edit(userId: string, plan: Plan, instruction: string, page: DiagramPage) {
@@ -315,7 +318,8 @@ export const diagramAiService = {
     const provider = getAiProvider();
     const validatedPage = diagramPageSchema.parse(page);
 
-    return withCredit(userId, plan, async () => {
+    return withAiSlot('diagram', userId, 2, () =>
+    withCredit(userId, plan, async () => {
       try {
         const first = await provider.complete(
           [
@@ -357,7 +361,8 @@ export const diagramAiService = {
         logger.error({ err, userId }, 'Diagram AI edit failed');
         throw toAiAppError(err);
       }
-    });
+    })
+    );
   },
 
   async fromImage(
@@ -381,7 +386,8 @@ export const diagramAiService = {
       prompt?.trim() ||
       'Convert this image into a DiagramDocument JSON matching our schema. Infer shapes, labels, and connections.';
 
-    return withCredit(userId, plan, async () => {
+    return withAiSlot('diagram', userId, 2, () =>
+    withCredit(userId, plan, async () => {
       try {
         const first = await provider.completeVision!(
           [
@@ -425,7 +431,8 @@ export const diagramAiService = {
         logger.error({ err, userId }, 'Diagram AI fromImage failed');
         throw toAiAppError(err);
       }
-    });
+    })
+    );
   },
 
   async analyze(userId: string, plan: Plan, page: DiagramPage) {

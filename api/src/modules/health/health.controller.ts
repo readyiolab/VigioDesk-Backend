@@ -29,4 +29,17 @@ export const healthController = {
       next(err);
     }
   },
+
+  async getMetrics(req: Request, res: Response, next: NextFunction) {
+    try {
+      const wantProm =
+        String(req.query.format || '').toLowerCase() === 'prometheus' ||
+        (req.headers.accept || '').includes('text/plain');
+      const report = await healthService.getMetrics(wantProm);
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).type(report.contentType).send(report.body);
+    } catch (err) {
+      next(err);
+    }
+  },
 };

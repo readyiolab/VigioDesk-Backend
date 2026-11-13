@@ -15,6 +15,7 @@ import diagramsRoutes from './modules/diagrams/diagrams.routes';
 import diagramPublicRoutes from './modules/diagrams/public.routes';
 import { rateLimiter } from './middleware/rateLimit.middleware';
 import { errorHandler } from './middleware/errorHandler.middleware';
+import { requestMetricsMiddleware } from './middleware/requestMetrics.middleware';
 import { createDashboard } from './lib/bullBoard';
 import { createMysqlPool } from './lib/mysql';
 import { isMailerConfigured } from './lib/mailer';
@@ -95,6 +96,9 @@ app.use(
   })
 );
 
+// In-flight / duration metrics for /api/health/metrics
+app.use(requestMetricsMiddleware);
+
 // Request logging. Mounted BEFORE the body parsers so that every route below —
 // including the signing router with its own parser — is logged.
 app.use(
@@ -106,9 +110,15 @@ app.use(
         req.url === '/api/health' ||
         req.url === '/health/live' ||
         req.url === '/health/ready' ||
+        req.url === '/health/metrics' ||
         req.url === '/api/health/live' ||
-        req.url === '/api/health/ready',
+        req.url === '/api/health/ready' ||
+        req.url === '/api/health/metrics',
     },
+    customProps: (req, res) => ({
+      route: (req as any).route?.path || req.url?.split('?')[0],
+      durationMs: typeof (res as any).responseTime === 'number' ? (res as any).responseTime : undefined,
+    }),
   })
 );
 

@@ -758,15 +758,17 @@ let generateWorker: Worker | null = null;
 let sendWorker: Worker | null = null;
 
 export function startLetterWorkers() {
+  const genConcurrency = Math.max(1, Number(process.env.LETTER_GENERATE_CONCURRENCY || 2));
+  const sendConcurrency = Math.max(1, Number(process.env.LETTER_SEND_CONCURRENCY || 1));
   generateWorker = new Worker<LetterGenerateJob>(
     LETTER_GENERATE_QUEUE,
     async (job) => processGenerateChunk(job),
-    { connection: redis as any, concurrency: 2 }
+    { connection: redis as any, concurrency: genConcurrency }
   );
   sendWorker = new Worker<LetterSendJob>(
     LETTER_SEND_QUEUE,
     async (job) => processSendChunk(job),
-    { connection: redis as any, concurrency: 1 }
+    { connection: redis as any, concurrency: sendConcurrency }
   );
 
   generateWorker.on('failed', (job, err) => {

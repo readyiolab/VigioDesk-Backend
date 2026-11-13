@@ -27,9 +27,10 @@ const envSchema = z.object({
   DB_USER: z.string().default('root'),
   DB_PASSWORD: z.string().default(''),
   DB_NAME: z.string().default('pdf_saas'),
-  DB_CONNECTION_LIMIT: z.coerce.number().default(30),
+  /** Per-process MySQL pool. Keep API×N + worker + webreports under MySQL max_connections. */
+  DB_CONNECTION_LIMIT: z.coerce.number().default(15),
   /** Max waiters for a free MySQL connection (0 = unbounded; production should stay finite). */
-  DB_QUEUE_LIMIT: z.coerce.number().default(500),
+  DB_QUEUE_LIMIT: z.coerce.number().default(200),
   REDIS_URL: z.string().url(),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   JWT_EXPIRES_IN: z.string().default('24h'),
@@ -77,10 +78,10 @@ const envSchema = z.object({
   /** Razorpay subscription plan id for Pro checkout (e.g. plan_xxxxx). */
   RAZORPAY_PLAN_ID: z.string().optional(),
   /**
-   * When true (default), letter generate/send + sign-finalize workers run inside the API.
-   * Set false in production and start them from the worker process instead.
+   * When true, letter generate/send + sign-finalize run inside the API (local/dev).
+   * Production must set false and RUN_PRODUCT_WORKERS=true on the worker process.
    */
-  INLINE_LETTER_SIGN_WORKERS: envBool(true),
+  INLINE_LETTER_SIGN_WORKERS: envBool(false),
 
   // --- Email (SMTP) ---
   // Carries signing invitations and OTPs. All optional so the API still boots

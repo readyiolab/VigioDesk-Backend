@@ -211,7 +211,11 @@ export async function initializeLetterSchema(conn: PoolConnection): Promise<void
   await ensureIndex(conn, 'tbl_org_user', 'idx_org_user_user', 'userId');
   await ensureIndex(conn, 'tbl_org_user', 'idx_org_user_user_status', 'userId, status');
   await ensureIndex(conn, 'tbl_letter_batch', 'idx_letter_batch_created', 'organizationId, createdAt');
+  await ensureIndex(conn, 'tbl_letter_batch', 'idx_letter_batch_org_status', 'organizationId, status, updatedAt');
+  await ensureIndex(conn, 'tbl_letter_brand_profile', 'idx_letter_brand_org', 'organizationId, updatedAt');
+  await ensureIndex(conn, 'tbl_letter_template', 'idx_letter_template_org', 'organizationId, updatedAt');
   await ensureIndex(conn, 'tbl_letter_batch_employee', 'idx_letter_emp_batch_row', 'batchId, rowIndex');
+  await ensureIndex(conn, 'tbl_letter_batch_employee', 'idx_letter_emp_batch_validation', 'batchId, validationStatus');
 
   await seedOwnerMemberships(conn);
 

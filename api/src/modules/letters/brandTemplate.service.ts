@@ -4,6 +4,7 @@ import { AppError } from '../../middleware/errorHandler.middleware';
 import { writeLetterAudit } from '../orgs/orgs.service';
 import { orgScope } from './orgScope';
 import { STARTER_TEMPLATES, STARTER_TEMPLATE_NAMES, extractFieldTokens, type LetterType } from './letterFields';
+import { cacheDel, cacheGetJson, cacheSetJson, listCacheKey } from '../../lib/listCache';
 
 function newId() {
   return crypto.randomUUID();
@@ -21,7 +22,19 @@ function parseJsonField<T>(value: unknown, fallback: T): T {
 
 export const brandService = {
   async list(organizationId: string) {
-    return orgScope.selectAll(organizationId, 'tbl_letter_brand_profile', '*', '', [], 'ORDER BY createdAt DESC');
+    const cacheKey = listCacheKey('letter-brands', organizationId);
+    const cached = await cacheGetJson<any[]>(cacheKey);
+    if (cached) return cached;
+    const rows = await orgScope.selectAll(
+      organizationId,
+      'tbl_letter_brand_profile',
+      'id, organizationId, name, logoKey, letterheadKey, footerText, signatoryName, signatoryDesignation, defaultFont, createdAt, updatedAt',
+      '',
+      [],
+      'ORDER BY createdAt DESC'
+    );
+    await cacheSetJson(cacheKey, rows, 60);
+    return rows;
   },
 
   async get(organizationId: string, id: string) {
@@ -58,6 +71,7 @@ export const brandService = {
     await writeLetterAudit(organizationId, userId, 'BRAND_CREATED', 'brand_profile', id, {
       name: input.name,
     });
+    void cacheDel(listCacheKey('letter-brands', organizationId));
     return this.get(organizationId, id);
   },
 
@@ -91,6 +105,7 @@ export const brandService = {
     if (Object.keys(data).length === 0) return this.get(organizationId, id);
     await orgScope.update(organizationId, 'tbl_letter_brand_profile', data, 'id = ?', [id]);
     await writeLetterAudit(organizationId, userId, 'BRAND_UPDATED', 'brand_profile', id, data);
+    void cacheDel(listCacheKey('letter-brands', organizationId));
     return this.get(organizationId, id);
   },
 
@@ -98,21 +113,27 @@ export const brandService = {
     await this.get(organizationId, id);
     await orgScope.delete(organizationId, 'tbl_letter_brand_profile', 'id = ?', [id]);
     await writeLetterAudit(organizationId, userId, 'BRAND_DELETED', 'brand_profile', id);
+    void cacheDel(listCacheKey('letter-brands', organizationId));
     return { deleted: true };
   },
 };
 
 export const templateService = {
   async list(organizationId: string) {
+    const cacheKey = listCacheKey('letter-templates', organizationId);
+    const cached = await cacheGetJson<any[]>(cacheKey);
+    if (cached) return cached;
     const rows = await orgScope.selectAll(
       organizationId,
       'tbl_letter_template',
-      '*',
+      'id, organizationId, name, type, contentJson, fieldTokens, version, createdBy, createdAt, updatedAt',
       '',
       [],
       'ORDER BY updatedAt DESC'
     );
-    return rows.map(publicTemplate);
+    const mapped = rows.map(publicTemplate);
+    await cacheSetJson(cacheKey, mapped, 60);
+    return mapped;
   },
 
   async get(organizationId: string, id: string) {
@@ -144,6 +165,7 @@ export const templateService = {
       name: input.name,
       type: input.type,
     });
+    void cacheDel(listCacheKey('letter-templates', organizationId));
     return this.get(organizationId, id);
   },
 
@@ -185,6 +207,7 @@ export const templateService = {
     await writeLetterAudit(organizationId, userId, 'TEMPLATE_UPDATED', 'letter_template', id, {
       version: data.version ?? existing.version,
     });
+    void cacheDel(listCacheKey('letter-templates', organizationId));
     return this.get(organizationId, id);
   },
 
@@ -192,6 +215,7 @@ export const templateService = {
     await this.get(organizationId, id);
     await orgScope.delete(organizationId, 'tbl_letter_template', 'id = ?', [id]);
     await writeLetterAudit(organizationId, userId, 'TEMPLATE_DELETED', 'letter_template', id);
+    void cacheDel(listCacheKey('letter-templates', organizationId));
     return { deleted: true };
   },
 
@@ -221,7 +245,9 @@ export const templateService = {
    */
   async refreshStarters(organizationId: string, userId: string, overwrite = false) {
     const existing = await this.list(organizationId);
-    const byName = new Map(existing.map((t: any) => [String(t.name), t]));
+    const byName = new Map<string, { id: string; name: string }>(
+      existing.map((t: { id: string; name: string }) => [String(t.name), t])
+    );
     let seeded = 0;
     let refreshed = 0;
 

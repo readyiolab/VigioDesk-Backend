@@ -139,6 +139,18 @@ export const aiRateLimiter = rateLimit({
   },
 });
 
+/** Public share-link autosave / edits — unauthenticated write surface. */
+export const sharedDiagramWriteLimiter = rateLimit({
+  ...common,
+  windowMs: 60 * 1000,
+  max: 30,
+  store: redisStore('rl:diagram-share-write:'),
+  message: {
+    status: 'error',
+    message: 'Too many shared diagram updates. Please wait a moment.',
+  },
+});
+
 // Polling-friendly limiter for job status reads (called frequently by clients).
 export const pollRateLimiter = rateLimit({
   ...common,

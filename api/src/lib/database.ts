@@ -3,6 +3,9 @@ import { env } from '../config/env';
 import { logger } from './logger';
 import { withRetry } from './retry';
 import { normalizeOrderBy } from './databaseOrderBy';
+import { metricsRecordDbAcquire, metricsRecordSlowQuery } from './metrics';
+
+const SLOW_QUERY_MS = 200;
 
 /** MySQL / network errors worth retrying. */
 const RETRYABLE_DB_ERRORS = new Set([
@@ -81,13 +84,40 @@ export class Database {
   }
 
   private async _executeWithRetry<T>(operation: () => Promise<T>, context = 'DB'): Promise<T> {
-    return withRetry(operation, {
-      maxAttempts: 3,
-      baseDelay: 500,
-      maxDelay: 5000,
-      context,
-      retryIf: isRetryable,
-    });
+    return withRetry(
+      async () => {
+        const started = Date.now();
+        try {
+          return await operation();
+        } finally {
+          const durationMs = Date.now() - started;
+          metricsRecordDbAcquire(durationMs);
+          if (durationMs >= SLOW_QUERY_MS) {
+            metricsRecordSlowQuery();
+            logger.warn({ context, durationMs }, 'slow.sql');
+          }
+        }
+      },
+      {
+        maxAttempts: 3,
+        baseDelay: 500,
+        maxDelay: 5000,
+        context,
+        retryIf: isRetryable,
+      }
+    );
+  }
+
+  /** Pool waiters + connection counts for metrics (best-effort; mysql2 private fields). */
+  getPoolStats(): { all: number; free: number; queue: number; limit: number } {
+    const raw = this.pool as any;
+    const inner = raw?.pool;
+    return {
+      all: inner?._allConnections?.length ?? 0,
+      free: inner?._freeConnections?.length ?? 0,
+      queue: inner?._connectionQueue?.length ?? 0,
+      limit: env.DB_CONNECTION_LIMIT || 25,
+    };
   }
 
   async testConnection(): Promise<void> {

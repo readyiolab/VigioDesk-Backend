@@ -111,6 +111,8 @@ async function initializeDatabase(dbPool: Pool): Promise<void> {
     await ensureIndex(conn, 'tbl_job', 'idx_job_status', 'status');
     await ensureIndex(conn, 'tbl_job', 'idx_job_status_created', 'status, createdAt');
     await ensureIndex(conn, 'tbl_job', 'idx_job_user_created', 'userId, createdAt');
+    // Hot path: History / active-jobs poll filters by user + status + createdAt
+    await ensureIndex(conn, 'tbl_job', 'idx_job_user_status_created', 'userId, status, createdAt');
     await ensureIndex(conn, 'tbl_subscription', 'idx_sub_razorpay', 'razorpaySubId');
     await ensureIndex(conn, 'tbl_cloud_integration', 'idx_cloud_user', 'userId');
 

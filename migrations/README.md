@@ -21,3 +21,4 @@ Boot DDL remains the source of truth for new environments; this folder records i
 | `001_suite_asset.sql` | Cross-product Asset Library (`tbl_suite_asset`) |
 | `002_ai_usage.sql` | Durable AI credit ledger (`tbl_ai_usage`) |
 | `003_webhook_outbound.sql` | Outbound webhook endpoints + delivery log |
+| `004_perf_hot_indexes.sql` | Hot-path indexes for jobs/letters/diagrams under concurrency |

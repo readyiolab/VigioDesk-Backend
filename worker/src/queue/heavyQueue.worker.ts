@@ -7,7 +7,7 @@ import { logger } from '../lib/logger';
 export const startHeavyWorker = () => {
   const worker = new Worker(HEAVY_JOBS_QUEUE, jobRouter, {
     connection: redis as any,
-    concurrency: 2, // Only process 2 heavy tasks (e.g. LibreOffice, OCR, compress) at a time
+    concurrency: Math.max(1, Number(process.env.HEAVY_QUEUE_CONCURRENCY || 2)),
     // Detect workers that died mid-job and recover the job rather than losing it.
     stalledInterval: 30000,
     maxStalledCount: 2,

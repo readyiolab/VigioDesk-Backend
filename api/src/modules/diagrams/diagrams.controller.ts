@@ -99,6 +99,31 @@ export const diagramsController = {
     }
   },
 
+  async getVersion(req: Request, res: Response, next: NextFunction) {
+    try {
+      const content = await diagramsService.getVersionContent(
+        req.orgContext!.organizationId,
+        req.params.id,
+        Number(req.params.version)
+      );
+      res.json({ content, version: Number(req.params.version) });
+    } catch (e) {
+      next(e);
+    }
+  },
+
+  async getThumbnail(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await diagramsService.getThumbnailUrl(
+        req.orgContext!.organizationId,
+        req.params.id
+      );
+      res.json(result);
+    } catch (e) {
+      next(e);
+    }
+  },
+
   async restoreVersion(req: Request, res: Response, next: NextFunction) {
     try {
       const diagram = await diagramsService.restoreVersion(

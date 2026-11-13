@@ -19,6 +19,25 @@ export const jobsController = {
     }
   },
 
+  async listActive(req: Request, res: Response, next: NextFunction) {
+    try {
+      const jobs = await jobsService.listActiveJobs(req.user.id);
+      res.status(200).json({ jobs });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async listRecent(req: Request, res: Response, next: NextFunction) {
+    try {
+      const limit = Number(req.query.limit) || 20;
+      const jobs = await jobsService.listRecentJobs(req.user.id, limit);
+      res.status(200).json({ jobs });
+    } catch (err) {
+      next(err);
+    }
+  },
+
   async getJob(req: Request, res: Response, next: NextFunction) {
     try {
       const { id: userId } = req.user;

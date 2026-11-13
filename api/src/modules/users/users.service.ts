@@ -70,9 +70,16 @@ export const usersService = {
       throw new AppError('User not found', 404);
     }
 
-    const jobs = await db.selectAll('tbl_job', '*', 'userId = ?', [userId], 'ORDER BY createdAt DESC LIMIT 10');
+    // Lean profile: thin job rows only (no inputFiles JSON). History polls /jobs/active + /jobs/recent.
+    const jobs = await db.selectAll(
+      'tbl_job',
+      'id, tool, status, outputFile, errorMessage, createdAt, completedAt, expiresAt',
+      'userId = ?',
+      [userId],
+      'ORDER BY createdAt DESC LIMIT 10'
+    );
 
-    const limits = PLAN_LIMITS[user.plan as 'FREE' | 'PRO'];
+    const limits = PLAN_LIMITS[user.plan as 'FREE' | 'PRO' | 'ENTERPRISE'];
     const remainingOps = Math.max(0, limits.maxDailyOps - user.dailyOpsUsed);
 
     return {
@@ -87,21 +94,10 @@ export const usersService = {
       dailyOpsRemaining: remainingOps,
       dailyOpsResetAt: user.dailyOpsResetAt,
       createdAt: user.createdAt,
-      jobs: jobs.map((job: any) => {
-        let inputFilesArray: string[] = [];
-        try {
-          if (job.inputFiles) {
-            inputFilesArray =
-              typeof job.inputFiles === 'string' ? JSON.parse(job.inputFiles) : job.inputFiles;
-          }
-        } catch {
-          // ignore
-        }
-        return {
-          ...job,
-          inputFiles: inputFilesArray,
-        };
-      }),
+      jobs: jobs.map((job: any) => ({
+        ...job,
+        inputFiles: [] as string[],
+      })),
     };
   },
 };

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { validate } from '../../middleware/validate.middleware';
+import { sharedDiagramWriteLimiter } from '../../middleware/rateLimit.middleware';
 import { diagramsController } from './diagrams.controller';
 import { sharedTokenSchema, sharedUpdateSchema } from './diagrams.types';
 
@@ -16,6 +17,7 @@ router.get(
 );
 router.patch(
   '/:token',
+  sharedDiagramWriteLimiter,
   validate(sharedUpdateSchema as any),
   diagramsController.updateShared
 );

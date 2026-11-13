@@ -8,6 +8,9 @@ import { createJobSchema } from './jobs.types';
 const router = Router();
 
 router.post('/', authMiddleware, validate(createJobSchema), jobsController.createJob);
+// Thin list endpoints (must be registered before /:jobId)
+router.get('/active', authMiddleware, pollRateLimiter, jobsController.listActive);
+router.get('/recent', authMiddleware, pollRateLimiter, jobsController.listRecent);
 // Live progress via Server-Sent Events (authenticates via query token internally).
 router.get('/:jobId/stream', jobsController.streamJob);
 // Status polling gets its own higher-frequency limiter (fallback for SSE).

@@ -14,6 +14,7 @@ import type { ChatInput, ExplainInput, SummarizeInput } from './ai.types';
 import { asPlan, getStorageForUser, resolveUserStorageContext } from '../../lib/storage';
 import type { Plan } from '../../../../shared/types';
 import { aiExtractQueue, enqueueAiExtract } from '../../lib/letterQueues';
+import { withAiSlot } from '../../lib/aiSemaphore';
 
 const AI_PREFIX = 'pdf-saas-ai';
 const AI_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
@@ -67,19 +68,23 @@ export const aiService = {
   },
 
   async summarize(userId: string, plan: Plan, input: SummarizeInput) {
-    const text = await this.prepareDocument(userId, input.fileKey);
-    return this.runOneShot(userId, asPlan(plan), [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: `${SUMMARY_PROMPTS[input.style]}\n\n--- DOCUMENT ---\n${text}` },
-    ]);
+    return withAiSlot('pdf-ai', userId, 2, async () => {
+      const text = await this.prepareDocument(userId, input.fileKey);
+      return this.runOneShot(userId, asPlan(plan), [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `${SUMMARY_PROMPTS[input.style]}\n\n--- DOCUMENT ---\n${text}` },
+      ]);
+    });
   },
 
   async explain(userId: string, plan: Plan, input: ExplainInput) {
-    const text = await this.prepareDocument(userId, input.fileKey);
-    return this.runOneShot(userId, asPlan(plan), [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: `${EXPLAIN_PROMPTS[input.audience]}\n\n--- DOCUMENT ---\n${text}` },
-    ]);
+    return withAiSlot('pdf-ai', userId, 2, async () => {
+      const text = await this.prepareDocument(userId, input.fileKey);
+      return this.runOneShot(userId, asPlan(plan), [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `${EXPLAIN_PROMPTS[input.audience]}\n\n--- DOCUMENT ---\n${text}` },
+      ]);
+    });
   },
 
   /**
@@ -91,15 +96,17 @@ export const aiService = {
    * so the user's own turns can't overwrite or spoof it.
    */
   async chat(userId: string, plan: Plan, input: ChatInput) {
-    const text = await this.prepareDocument(userId, input.fileKey);
-    const history = input.messages.slice(-MAX_CHAT_TURNS);
+    return withAiSlot('pdf-ai', userId, 2, async () => {
+      const text = await this.prepareDocument(userId, input.fileKey);
+      const history = input.messages.slice(-MAX_CHAT_TURNS);
 
-    const messages: AiMessage[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'system', content: `The user is asking about this document:\n\n--- DOCUMENT ---\n${text}` },
-      ...history.map((m) => ({ role: m.role, content: m.content }) as AiMessage),
-    ];
-    return this.runOneShot(userId, plan, messages, 1024);
+      const messages: AiMessage[] = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: `The user is asking about this document:\n\n--- DOCUMENT ---\n${text}` },
+        ...history.map((m) => ({ role: m.role, content: m.content }) as AiMessage),
+      ];
+      return this.runOneShot(userId, plan, messages, 1024);
+    });
   },
 
   /** Reserves a credit, calls the model, refunds on failure. Shared by all three. */

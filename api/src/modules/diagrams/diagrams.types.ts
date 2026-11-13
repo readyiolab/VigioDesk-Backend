@@ -81,6 +81,7 @@ export const diagramNodeSchema = z.object({
   style: nodeStyleSchema.optional(),
   kind: nodeKindSchema.optional().default('shape'),
   locked: z.boolean().optional(),
+  hidden: z.boolean().optional(),
   groupId: z.string().optional(),
   freehand: freehandSchema.optional(),
   table: tableSchema.optional(),
@@ -158,11 +159,15 @@ const emptyParams = z.object({}).optional();
 const emptyBody = z.object({}).optional();
 
 export const createDiagramSchema = z.object({
-  body: z.object({
-    title: z.string().min(1).max(255).optional(),
-    folderId: z.string().nullable().optional(),
-    content: diagramDocumentSchema.optional(),
-  }),
+  body: z
+    .object({
+      title: z.string().min(1).max(255).optional(),
+      folderId: z.string().nullable().optional(),
+      content: diagramDocumentSchema.optional(),
+    })
+    .refine((b) => (b.content ? contentSizeOk(b.content) : true), {
+      message: 'Diagram content is too large (max ~2MB)',
+    }),
   query: emptyQuery,
   params: emptyParams,
 });
@@ -175,10 +180,18 @@ export const updateDiagramSchema = z.object({
       title: z.string().min(1).max(255).optional(),
       folderId: z.string().nullable().optional(),
       content: diagramDocumentSchema.optional(),
+      thumbnailPngKey: z.string().max(512).nullable().optional(),
     })
-    .refine((b) => b.title !== undefined || b.folderId !== undefined || b.content !== undefined, {
-      message: 'Nothing to update',
-    })
+    .refine(
+      (b) =>
+        b.title !== undefined ||
+        b.folderId !== undefined ||
+        b.content !== undefined ||
+        b.thumbnailPngKey !== undefined,
+      {
+        message: 'Nothing to update',
+      }
+    )
     .refine((b) => (b.content ? contentSizeOk(b.content) : true), {
       message: 'Diagram content is too large (max ~2MB)',
     }),
@@ -252,11 +265,24 @@ export const sharedTokenSchema = z.object({
 
 export const sharedUpdateSchema = z.object({
   params: z.object({ token: z.string().min(1) }),
-  body: z.object({
-    content: diagramDocumentSchema,
-    title: z.string().min(1).max(255).optional(),
+  body: z
+    .object({
+      content: diagramDocumentSchema,
+      title: z.string().min(1).max(255).optional(),
+    })
+    .refine((b) => contentSizeOk(b.content), {
+      message: 'Diagram content is too large (max ~2MB)',
+    }),
+  query: emptyQuery,
+});
+
+export const getVersionSchema = z.object({
+  params: z.object({
+    id: z.string().min(1),
+    version: z.coerce.number().int().positive(),
   }),
   query: emptyQuery,
+  body: emptyBody,
 });
 
 export const aiGenerateSchema = z.object({

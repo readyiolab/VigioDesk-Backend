@@ -139,10 +139,16 @@ async function bootstrap() {
     aiExtractWorker = startAiExtractWorker();
     signConvertWorker = startSignConvertWorker();
 
-    // Optional: run letter generate/send + sign-finalize here when API
-    // has INLINE_LETTER_SIGN_WORKERS=false. Enable with RUN_PRODUCT_WORKERS=true.
-    if (String(process.env.RUN_PRODUCT_WORKERS || '').toLowerCase() === 'true') {
+    // Production: API sets INLINE_LETTER_SIGN_WORKERS=false and this process
+    // sets RUN_PRODUCT_WORKERS=true (default true in production).
+    const runProduct =
+      String(process.env.RUN_PRODUCT_WORKERS || (env.NODE_ENV === 'production' ? 'true' : 'false'))
+        .toLowerCase() === 'true';
+    if (runProduct) {
       stopProductWorkers = await startProductWorkersFromApi();
+      logger.info('Product workers (letter/sign) started on worker process');
+    } else {
+      logger.info('Product workers skipped (RUN_PRODUCT_WORKERS=false)');
     }
 
     // 3. Start health check listener

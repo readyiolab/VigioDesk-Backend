@@ -9,6 +9,7 @@ import { SYSTEM_FIELDS, STARTER_TEMPLATES, extractFieldTokens } from './letterFi
 import { orgScope } from './orgScope';
 import { batchService } from './batch.service';
 import { parseModelJson } from './parseModelJson';
+import { withAiSlot } from '../../lib/aiSemaphore';
 
 export { parseModelJson } from './parseModelJson';
 
@@ -370,6 +371,7 @@ export const letterAiService = {
     plan: 'FREE' | 'PRO' | 'ENTERPRISE',
     input: { instruction: string; letterType?: string }
   ) {
+    return withAiSlot('letter-ai', organizationId, 2, async () => {
     await reserveAiCredit(userId, plan);
     const snippets = await this.retrieveSimilar(
       organizationId,
@@ -392,6 +394,7 @@ export const letterAiService = {
       true
     );
     return result;
+    });
   },
 
   async applyDraft(

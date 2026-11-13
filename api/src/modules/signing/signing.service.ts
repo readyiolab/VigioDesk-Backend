@@ -15,6 +15,7 @@ import { detectFileCategory } from '../../../../shared/fileType';
 import { PLAN_LIMITS } from '../../../../shared/constants';
 import { getStorageForUser } from '../../lib/storage';
 import { enqueueSignConvert } from '../../lib/queue';
+import { cacheGetJson, cacheSetJson, listCacheKey } from '../../lib/listCache';
 import {
   RECIPIENT_COLORS,
   SIGNING_LIMITS,
@@ -432,6 +433,10 @@ export const signingService = {
 
   /** Status tallies for the dashboard, in one round trip via Promise.all. */
   async getStats(userId: string) {
+    const cacheKey = listCacheKey('sign-stats', userId);
+    const cached = await cacheGetJson<Record<string, unknown>>(cacheKey);
+    if (cached) return cached;
+
     // Run status breakdown query and user quota query in parallel
     const [rows, user] = await Promise.all([
       db.queryAll(
@@ -466,7 +471,7 @@ export const signingService = {
       new Date(user.monthlySignsResetAt).getTime() < Date.now() - 30 * 24 * 60 * 60 * 1000;
     const used = windowElapsed ? 0 : Number(user?.monthlySignsUsed ?? 0);
 
-    return {
+    const payload = {
       byStatus,
       total,
       completionRate: finished > 0 ? Math.round((byStatus.COMPLETED / finished) * 100) : 0,
@@ -481,6 +486,8 @@ export const signingService = {
         plan,
       },
     };
+    await cacheSetJson(cacheKey, payload, 30);
+    return payload;
   },
 
   async getDocument(documentId: string, userId: string): Promise<SignDocumentDTO> {

@@ -117,10 +117,22 @@ router.delete(
 );
 
 router.get(
+  '/:id/thumbnail',
+  member,
+  validate(diagramIdSchema as any),
+  diagramsController.getThumbnail
+);
+router.get(
   '/:id/versions',
   member,
   validate(diagramIdSchema as any),
   diagramsController.listVersions
+);
+router.get(
+  '/:id/versions/:version',
+  member,
+  validate(restoreVersionSchema as any),
+  diagramsController.getVersion
 );
 router.post(
   '/:id/restore/:version',

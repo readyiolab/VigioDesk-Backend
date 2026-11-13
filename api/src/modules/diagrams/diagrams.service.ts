@@ -4,6 +4,7 @@ import { env } from '../../config/env';
 import { AppError } from '../../middleware/errorHandler.middleware';
 import type { DiagramDocument } from './diagrams.types';
 import { parsePagination, paginationMeta } from '../../lib/pagination';
+import { cacheDel, cacheGetJson, cacheSetJson, listCacheKey } from '../../lib/listCache';
 
 const MAX_VERSIONS = 20;
 
@@ -33,20 +34,34 @@ function newId() {
   return crypto.randomUUID();
 }
 
-function parseContent(contentJson: unknown): DiagramDocument {
+function parseContent(contentJson: unknown, opts?: { strict?: boolean }): DiagramDocument {
   if (contentJson == null) return emptyDocument();
   if (typeof contentJson === 'object') return contentJson as DiagramDocument;
   try {
     return JSON.parse(String(contentJson)) as DiagramDocument;
   } catch {
+    if (opts?.strict) throw new AppError('Diagram content is corrupt', 422);
     return emptyDocument();
   }
 }
 
-function publicDiagram(row: any, includeContent = false) {
-  const base = {
+async function assertFolderInOrg(
+  organizationId: string,
+  folderId: string | null | undefined
+): Promise<void> {
+  if (folderId == null || folderId === '') return;
+  const folder = await db.select(
+    'tbl_diagram_folder',
+    'id',
+    'id = ? AND organizationId = ?',
+    [folderId, organizationId]
+  );
+  if (!folder) throw new AppError('Folder not found in this organization', 400);
+}
+
+function publicDiagram(row: any, includeContent = false, opts?: { omitOrg?: boolean }) {
+  const base: Record<string, unknown> = {
     id: row.id as string,
-    organizationId: row.organizationId as string,
     folderId: (row.folderId as string | null) ?? null,
     title: row.title as string,
     currentVersion: Number(row.currentVersion ?? 1),
@@ -55,8 +70,11 @@ function publicDiagram(row: any, includeContent = false) {
     updatedAt: row.updatedAt,
     thumbnailPngKey: (row.thumbnailPngKey as string | null) ?? null,
   };
+  if (!opts?.omitOrg) {
+    base.organizationId = row.organizationId as string;
+  }
   if (includeContent) {
-    return { ...base, content: parseContent(row.contentJson) };
+    return { ...base, content: parseContent(row.contentJson, { strict: true }) };
   }
   return base;
 }
@@ -171,6 +189,7 @@ export const diagramsService = {
     userId: string,
     input: { title?: string; folderId?: string | null; content?: DiagramDocument }
   ) {
+    await assertFolderInOrg(organizationId, input.folderId);
     const id = newId();
     const content = input.content ?? emptyDocument();
     const contentJson = JSON.stringify(content);
@@ -191,13 +210,22 @@ export const diagramsService = {
     organizationId: string,
     userId: string,
     id: string,
-    input: { title?: string; folderId?: string | null; content?: DiagramDocument }
+    input: {
+      title?: string;
+      folderId?: string | null;
+      content?: DiagramDocument;
+      thumbnailPngKey?: string | null;
+    }
   ) {
     const row = await requireDiagram(organizationId, id, false);
     const data: Record<string, unknown> = {};
 
     if (input.title !== undefined) data.title = input.title.trim() || row.title;
-    if (input.folderId !== undefined) data.folderId = input.folderId;
+    if (input.folderId !== undefined) {
+      await assertFolderInOrg(organizationId, input.folderId);
+      data.folderId = input.folderId;
+    }
+    if (input.thumbnailPngKey !== undefined) data.thumbnailPngKey = input.thumbnailPngKey;
 
     if (input.content !== undefined) {
       const expectedVersion = Number(row.currentVersion || 1);
@@ -244,6 +272,15 @@ export const diagramsService = {
     await requireDiagram(organizationId, id, false);
     await db.delete('tbl_diagram', 'id = ? AND organizationId = ?', [id, organizationId]);
     return { ok: true };
+  },
+
+  async getThumbnailUrl(organizationId: string, id: string) {
+    const row = await requireDiagram(organizationId, id, false);
+    const key = row.thumbnailPngKey as string | null;
+    if (!key) throw new AppError('No thumbnail', 404);
+    const { getSignedDownloadUrl } = await import('../../lib/s3.js');
+    const url = await getSignedDownloadUrl(key, undefined, 300);
+    return { url };
   },
 
   async listVersions(organizationId: string, id: string) {
@@ -298,16 +335,22 @@ export const diagramsService = {
   },
 
   async listFolders(organizationId: string) {
-    return db.selectAll(
+    const cacheKey = listCacheKey('diagram-folders', organizationId);
+    const cached = await cacheGetJson<Record<string, unknown>[]>(cacheKey);
+    if (cached) return cached;
+    const rows = await db.selectAll(
       'tbl_diagram_folder',
-      '*',
+      'id, organizationId, name, createdBy, createdAt, updatedAt',
       'organizationId = ?',
       [organizationId],
       'ORDER BY name ASC'
     );
+    await cacheSetJson(cacheKey, rows, 60);
+    return rows;
   },
 
   async createFolder(organizationId: string, userId: string, name: string) {
+    void cacheDel(listCacheKey('diagram-folders', organizationId));
     const id = newId();
     await db.insert('tbl_diagram_folder', {
       id,
@@ -435,7 +478,7 @@ export const diagramsService = {
       throw new AppError('This share link has expired', 410);
     }
     return {
-      diagram: publicDiagram(row, true),
+      diagram: publicDiagram(row, true, { omitOrg: true }),
       share: {
         role: row.role as 'VIEW' | 'EDIT',
         token: row.token as string,

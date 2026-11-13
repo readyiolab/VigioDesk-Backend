@@ -1,13 +1,11 @@
 import { db } from '../../lib/mysql';
 import { pushToQueue } from '../../lib/queue';
 import {
-  readObjectHeadWithSize,
   deleteObject,
   getSignedDownloadUrl,
 } from '../../lib/s3';
 import { env } from '../../config/env';
 import { PLAN_LIMITS, TOOL_INPUT_TYPES } from '../../../../shared/constants';
-import { detectFileCategory } from '../../../../shared/fileType';
 import { AppError } from '../../middleware/errorHandler.middleware';
 import { CreateJobInput } from './jobs.types';
 import { ToolName } from '../../../../shared/types';
@@ -19,6 +17,8 @@ import {
 } from '../../lib/storage';
 import { isOwnedUploadKey } from '../../lib/objectKeyOwnership';
 import { logger } from '../../lib/logger';
+import { probeObjects } from '../../lib/objectProbeCache';
+import { invalidateUser } from '../../lib/userCache';
 import crypto from 'crypto';
 
 export type CreateJobContext = {
@@ -37,41 +37,40 @@ async function validateInputs(
 ): Promise<void> {
   const allowed = TOOL_INPUT_TYPES[tool];
 
-  await Promise.all(
-    inputFiles.map(async (key) => {
-      if (!isOwnedUploadKey(key, userId, organizationId)) {
-        throw new AppError('Invalid file key for this account.', 403);
-      }
+  for (const key of inputFiles) {
+    if (!isOwnedUploadKey(key, userId, organizationId)) {
+      throw new AppError('Invalid file key for this account.', 403);
+    }
+  }
 
-      let size: number;
-      let head: Buffer;
-      try {
-        // Single ranged GET — size from Content-Range + magic bytes (was HEAD + Range).
-        const probe = await readObjectHeadWithSize(key, 1024, bindingId);
-        size = probe.size;
-        head = probe.bytes;
-      } catch (err) {
-        await reportRuntimeStorageFailure(organizationId, err);
-        throw new AppError('An uploaded file could not be found. Please re-upload.', 400);
-      }
+  let probes;
+  try {
+    // Cached + concurrency-capped ranged GETs (was unbounded Promise.all per file).
+    probes = await probeObjects(inputFiles, bindingId);
+  } catch (err) {
+    await reportRuntimeStorageFailure(organizationId, err);
+    throw new AppError('An uploaded file could not be found. Please re-upload.', 400);
+  }
 
-      if (size <= 0) {
-        await deleteObject(key, bindingId);
-        throw new AppError('An uploaded file is empty.', 400);
-      }
-      if (size > maxFileSize) {
-        await deleteObject(key, bindingId);
-        const maxMb = Math.floor(maxFileSize / (1024 * 1024));
-        throw new AppError(`A file exceeds your plan limit of ${maxMb}MB.`, 400);
-      }
+  for (let i = 0; i < inputFiles.length; i++) {
+    const key = inputFiles[i]!;
+    const { size, category } = probes[i]!;
 
-      const category = detectFileCategory(head);
-      if (!allowed.includes(category)) {
-        await deleteObject(key, bindingId);
-        throw new AppError(`An uploaded file is not a valid input for this tool.`, 400);
-      }
-    })
-  );
+    if (size <= 0) {
+      await deleteObject(key, bindingId);
+      throw new AppError('An uploaded file is empty.', 400);
+    }
+    if (size > maxFileSize) {
+      await deleteObject(key, bindingId);
+      const maxMb = Math.floor(maxFileSize / (1024 * 1024));
+      throw new AppError(`A file exceeds your plan limit of ${maxMb}MB.`, 400);
+    }
+
+    if (!allowed.includes(category as import('../../../../shared/fileType').FileCategory)) {
+      await deleteObject(key, bindingId);
+      throw new AppError(`An uploaded file is not a valid input for this tool.`, 400);
+    }
+  }
 }
 
 export const jobsService = {
@@ -172,6 +171,7 @@ export const jobsService = {
         },
         'jobs.create'
       );
+      void invalidateUser(userId);
     } catch (err) {
       await db
         .execute(
@@ -196,8 +196,38 @@ export const jobsService = {
     };
   },
 
+  /** Thin rows for History polling — only in-flight jobs. */
+  async listActiveJobs(userId: string) {
+    const jobs = await db.selectAll(
+      'tbl_job',
+      'id, tool, status, outputFile, errorMessage, createdAt, completedAt, expiresAt',
+      "userId = ? AND status IN ('QUEUED', 'PROCESSING')",
+      [userId],
+      'ORDER BY createdAt DESC LIMIT 50'
+    );
+    return jobs.map((job: any) => ({ ...job, inputFiles: [] as string[] }));
+  },
+
+  /** Recent jobs for History page (lean columns). */
+  async listRecentJobs(userId: string, limit = 20) {
+    const safeLimit = Math.min(50, Math.max(1, Number(limit) || 20));
+    const jobs = await db.selectAll(
+      'tbl_job',
+      'id, tool, status, outputFile, errorMessage, createdAt, completedAt, expiresAt',
+      'userId = ?',
+      [userId],
+      `ORDER BY createdAt DESC LIMIT ${safeLimit}`
+    );
+    return jobs.map((job: any) => ({ ...job, inputFiles: [] as string[] }));
+  },
+
   async getJobById(jobId: string, userId: string): Promise<any> {
-    const job: any = await db.select('tbl_job', '*', 'id = ?', [jobId]);
+    const job: any = await db.select(
+      'tbl_job',
+      'id, userId, tool, status, inputFiles, outputFile, errorMessage, createdAt, completedAt, expiresAt, organizationId, storageBindingId',
+      'id = ?',
+      [jobId]
+    );
 
     if (!job) {
       throw new AppError('Job not found', 404);

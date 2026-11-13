@@ -22,7 +22,7 @@ export function startSignFinalizeWorker(): Worker<SignFinalizePayload> {
     },
     {
       connection: redis as any,
-      concurrency: 1,
+      concurrency: Math.max(1, Number(process.env.SIGN_FINALIZE_CONCURRENCY || 2)),
       stalledInterval: 60_000,
       maxStalledCount: 2,
     }
