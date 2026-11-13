@@ -33,6 +33,7 @@ let letterZipWorker: any;
 let aiExtractWorker: any;
 let signConvertWorker: any;
 let stopProductWorkers: (() => Promise<void>) | null = null;
+let productWorkersHealthy = true;
 let server: any;
 
 // Spin up a minimal Express server for container/health checks
@@ -54,7 +55,9 @@ app.get('/health', async (req, res) => {
     redisStatus = 'DOWN';
   }
 
-  const overallStatus = dbStatus === 'UP' && redisStatus === 'UP' ? 'UP' : 'DEGRADED';
+  const productOk = productWorkersHealthy;
+  const overallStatus =
+    dbStatus === 'UP' && redisStatus === 'UP' && productOk ? 'UP' : 'DOWN';
   const statusCode = overallStatus === 'UP' ? 200 : 503;
 
   res.status(statusCode).json({
@@ -63,6 +66,7 @@ app.get('/health', async (req, res) => {
     services: {
       database: dbStatus,
       redis: redisStatus,
+      letterWorkers: productOk ? 'UP' : 'DOWN',
     },
   });
 });
@@ -145,9 +149,22 @@ async function bootstrap() {
       String(process.env.RUN_PRODUCT_WORKERS || (env.NODE_ENV === 'production' ? 'true' : 'false'))
         .toLowerCase() === 'true';
     if (runProduct) {
-      stopProductWorkers = await startProductWorkersFromApi();
-      logger.info('Product workers (letter/sign) started on worker process');
+      const product = await startProductWorkersFromApi();
+      stopProductWorkers = product.stop;
+      productWorkersHealthy = product.letterWorkersOk;
+      if (!product.letterWorkersOk) {
+        // Fail boot so PM2 shows errored instead of silently stranding letter jobs.
+        logger.fatal(
+          'RUN_PRODUCT_WORKERS=true but letter workers failed to start — exiting so the process is not marked healthy'
+        );
+        process.exit(1);
+      }
+      logger.info(
+        { letterWorkersOk: product.letterWorkersOk, signWorkersOk: product.signWorkersOk },
+        'Product workers ready on worker process'
+      );
     } else {
+      productWorkersHealthy = true; // not required in this mode
       logger.info('Product workers skipped (RUN_PRODUCT_WORKERS=false)');
     }
 
