@@ -21,6 +21,15 @@ export const listWebReportsSchema = z.object({
   params: z.object({}).optional().default({}),
 });
 
+export const historyWebReportsSchema = z.object({
+  body: z.object({}).optional().default({}),
+  query: z.object({
+    host: z.string().trim().min(1).max(253),
+    limit: z.coerce.number().int().min(1).max(50).default(24),
+  }),
+  params: z.object({}).optional().default({}),
+});
+
 export const reportIdSchema = z.object({
   body: z.object({}).optional().default({}),
   query: z.object({}).optional().default({}),

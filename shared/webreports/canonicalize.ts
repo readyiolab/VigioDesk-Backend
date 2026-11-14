@@ -98,6 +98,25 @@ export function isSameOrigin(candidate: string, origin: string): boolean {
   }
 }
 
+/**
+ * Same site for crawl seeding: www and apex share a registrable host.
+ * Scheme and effective port must still match the crawl origin.
+ */
+export function isSameSite(candidate: string, origin: string): boolean {
+  try {
+    const left = canonicalizeUrl(candidate);
+    const right = canonicalizeUrl(origin);
+    if (left.href.protocol !== right.href.protocol) return false;
+    const leftPort = left.href.port || (left.href.protocol === 'https:' ? '443' : '80');
+    const rightPort = right.href.port || (right.href.protocol === 'https:' ? '443' : '80');
+    if (leftPort !== rightPort) return false;
+    const stripWww = (host: string) => host.replace(/^www\./i, '');
+    return stripWww(left.hostname) === stripWww(right.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function normalizeCrawlUrl(candidate: string, base?: string): string | null {
   try {
     const absolute = base ? new URL(candidate, base).toString() : candidate;

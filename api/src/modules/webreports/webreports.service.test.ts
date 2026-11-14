@@ -33,6 +33,26 @@ function memoryRepo() {
       const owned = rows.filter((row) => row.userId === userId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : -1));
       return { rows: owned.slice(offset, offset + limit), total: owned.length };
     },
+    async listByHost(userId, normalizedHost, limit) {
+      const apex = normalizedHost.replace(/^www\./i, '');
+      const www = `www.${apex}`;
+      return rows
+        .filter(
+          (row) =>
+            row.userId === userId &&
+            row.status === 'completed' &&
+            (row.normalizedHost === apex || row.normalizedHost === www || row.normalizedHost === normalizedHost)
+        )
+        .sort((a, b) => (a.completedAt || a.createdAt).getTime() - (b.completedAt || b.createdAt).getTime())
+        .slice(0, limit);
+    },
+    async updateBranding(id, userId, branding) {
+      const row = rows.find((item) => item.id === id && item.userId === userId);
+      if (!row) return null;
+      if (branding.companyName !== undefined) row.customerCompanyName = branding.companyName;
+      if (branding.logoUrl !== undefined) row.customerLogoUrl = branding.logoUrl;
+      return row;
+    },
     async markFailed(id, message) {
       const row = rows.find((item) => item.id === id);
       if (row && (row.status === 'queued' || row.status === 'running')) {

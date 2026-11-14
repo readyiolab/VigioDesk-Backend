@@ -1,11 +1,12 @@
 import { crawlSite, parseSitemapXml, pickKeyPages } from '../../../shared/webreports/crawl';
-import { isSameOrigin } from '../../../shared/webreports/canonicalize';
+import { isSameOrigin, isSameSite, normalizeCrawlUrl } from '../../../shared/webreports/canonicalize';
 import { runSeoChecks } from '../../../shared/webreports/seoChecks';
 import { runAiChecks } from '../../../shared/webreports/aiChecks';
 import { jsRenderRatio } from '../../../shared/webreports/aiChecks';
 import { buildRecommendations } from '../../../shared/webreports/recommendations';
 import { scoreChecks, combineScores } from '../../../shared/webreports/scoring';
 import { weightsFromEnv } from '../../../shared/webreports/scoringConfig';
+import { buildCrawlMetrics, measurablePages, type SeoSource } from '../../../shared/webreports/measurable';
 import { SCORING_VERSION } from '../../../shared/webreports/types';
 import { progressFor } from '../../../shared/webreports/progress';
 import { summaryPayload } from '../../../shared/webreports/summary';
@@ -17,7 +18,7 @@ import { logger } from './runtime';
 import { parseHtml } from './parsePage';
 import { evaluateBotAccess, evaluateSearchBotAccess, isAllowedByRobots, sitemapsFromRobots } from './robotsEval';
 import { startSsrfProxy } from './proxy';
-import { launchBrowser, renderedTextLength, runDeviceSet } from './browser';
+import { fetchRenderedHtml, launchBrowser, renderedTextLength, runDeviceSet } from './browser';
 import { fetchFieldData, mergeField } from './psi';
 import { buildSummary } from './summaryClient';
 import { claimReport, loadReport, markFailed, readCheckpoint, saveCompleted, updateStage } from './store';
@@ -62,11 +63,22 @@ export async function runPipeline(reportId: string, generation: number, jobId: s
       if (!(await updateStage(reportId, jobId, generation, 'crawling', progressFor('crawling'), { crawl }))) return;
     }
 
+    proxy = await startSsrfProxy(nodeDnsResolve);
+    browser = await launchBrowser(proxy.port, env.CHROME_PATH);
+
+    let seoSource: SeoSource = measurablePages(crawl).length ? 'http' : 'unavailable';
+    if (seoSource === 'unavailable' && !signal.aborted) {
+      const recovered = await recoverHomepageFromBrowser(browser, crawl, env.WEBREPORTS_PAGE_TIMEOUT_MS);
+      if (recovered) {
+        crawl = recovered;
+        seoSource = 'browser-fallback';
+        logger.info({ reportId, jobId }, 'SEO recovered via browser HTML fallback');
+      }
+    }
+
     if (!(await updateStage(reportId, jobId, generation, 'analyzing_seo', progressFor('analyzing_seo')))) return;
     const seo = runSeoChecks(crawl);
 
-    proxy = await startSsrfProxy(nodeDnsResolve);
-    browser = await launchBrowser(proxy.port, env.CHROME_PATH);
     const sample = pickKeyPages(crawl.pages, crawl.startUrl, 3);
     for (const url of sample) {
       if (signal.aborted) break;
@@ -113,6 +125,7 @@ export async function runPipeline(reportId: string, generation: number, jobId: s
     const checks = [...seo, ...ai];
     const topFixes = buildRecommendations(checks, { mobile, desktop });
     const ratioPage = crawl.pages.find((page) => page.renderedVisibleTextLength !== null);
+    if (measurablePages(crawl).length === 0) seoSource = 'unavailable';
     const detail = {
       botAccess: crawl.botAccess,
       llmsTxt: {
@@ -137,6 +150,7 @@ export async function runPipeline(reportId: string, generation: number, jobId: s
       jsRatio: ratioPage
         ? jsRenderRatio(ratioPage.rawVisibleTextLength, ratioPage.renderedVisibleTextLength || 1)
         : null,
+      crawl: buildCrawlMetrics(crawl, seoSource),
     };
 
     if (!(await updateStage(reportId, jobId, generation, 'generating_summary', progressFor('generating_summary')))) return;
@@ -238,7 +252,7 @@ async function collectCrawl(startUrl: string, maxPages: number, signal: AbortSig
     seeds,
     signal,
     isAllowed: (url) => (robotsBody ? isAllowedByRobots(robotsBody, origin, url) : true),
-    fetchPage: (url) => fetchPage(url, signal),
+    fetchPage: (url) => fetchPage(url, signal, url === startUrl || seeds.slice(0, 5).includes(url)),
     parseHtml,
   });
   const sitemapState = classifySitemap(seeds, pages.pages);
@@ -344,18 +358,46 @@ async function sitemapSeeds(origin: string, robotsBody: string | null, rawRobots
   let depth = 0;
   while (queue.length && depth < 3 && urls.length < 100) {
     const next = queue.shift() as string;
-    if (seen.has(next) || !isSameOrigin(next, origin)) continue;
+    if (seen.has(next) || !isSameSite(next, origin)) continue;
     seen.add(next);
-    const file = await fetchText(next, signal);
+    const file = await fetchTextWithRetry(next, signal, 2);
     depth += 1;
     if (!file || file.status >= 400) continue;
     const parsed = parseSitemapXml(file.body);
-    for (const index of parsed.indexes) if (isSameOrigin(index, origin)) queue.push(index);
+    for (const index of parsed.indexes) if (isSameSite(index, origin)) queue.push(index);
     for (const url of parsed.urls) {
-      if (isSameOrigin(url, origin)) urls.push(url);
+      // Prefer same-origin queue URLs; rewrite www/apex to crawl origin host when same site
+      const normalized = normalizeToCrawlOrigin(url, origin);
+      if (normalized) urls.push(normalized);
     }
   }
   return Array.from(new Set(urls)).slice(0, 100);
+}
+
+function normalizeToCrawlOrigin(candidate: string, origin: string): string | null {
+  if (!isSameSite(candidate, origin)) return null;
+  if (isSameOrigin(candidate, origin)) return normalizeCrawlUrl(candidate) || candidate;
+  try {
+    const crawl = new URL(origin);
+    const target = new URL(candidate);
+    target.protocol = crawl.protocol;
+    target.hostname = crawl.hostname;
+    target.port = crawl.port;
+    return normalizeCrawlUrl(target.toString()) || target.toString();
+  } catch {
+    return null;
+  }
+}
+
+async function fetchTextWithRetry(url: string, signal: AbortSignal, attempts: number) {
+  let last: Awaited<ReturnType<typeof fetchText>> = null;
+  for (let i = 0; i < attempts; i += 1) {
+    if (signal.aborted) return null;
+    last = await fetchText(url, signal);
+    if (last && last.status < 500) return last;
+    if (i + 1 < attempts) await sleep(250 * (i + 1), signal);
+  }
+  return last;
 }
 
 async function fetchText(url: string, signal: AbortSignal) {
@@ -373,7 +415,19 @@ async function fetchText(url: string, signal: AbortSignal) {
   }
 }
 
-async function fetchPage(url: string, signal: AbortSignal) {
+async function fetchPage(url: string, signal: AbortSignal, retry = false) {
+  const attempts = retry ? 3 : 1;
+  let last = await fetchPageOnce(url, signal);
+  for (let i = 1; i < attempts; i += 1) {
+    if (!last.timedOut && last.statusCode !== null && last.statusCode < 500 && last.body) break;
+    if (signal.aborted) break;
+    await sleep(300 * i, signal);
+    last = await fetchPageOnce(url, signal);
+  }
+  return last;
+}
+
+async function fetchPageOnce(url: string, signal: AbortSignal) {
   const started = Date.now();
   try {
     const result = await safeFetch(url, {
@@ -406,11 +460,65 @@ async function fetchPage(url: string, signal: AbortSignal) {
       body: '',
       responseMs: Date.now() - started,
       sizeBytes: 0,
-      redirectChain: [],
+      redirectChain: [] as string[],
       timedOut,
       inconclusive: true,
     };
   }
+}
+
+async function recoverHomepageFromBrowser(
+  browser: Browser,
+  crawl: CrawlSnapshot,
+  timeoutMs: number
+): Promise<CrawlSnapshot | null> {
+  const rendered = await fetchRenderedHtml(browser, crawl.startUrl, timeoutMs);
+  if (!rendered?.html || !/<html[\s>]/i.test(rendered.html)) return null;
+  const parsed = parseHtml(rendered.html, rendered.finalUrl || crawl.startUrl);
+  const { links, ...fields } = parsed;
+  const internalLinks: string[] = [];
+  const externalLinks: string[] = [];
+  for (const link of links) {
+    const normalized = normalizeCrawlUrl(link, rendered.finalUrl || crawl.startUrl);
+    if (!normalized) continue;
+    if (isSameOrigin(normalized, crawl.origin)) internalLinks.push(normalized);
+    else externalLinks.push(normalized);
+  }
+  const page: PageSnapshot = {
+    url: crawl.startUrl,
+    finalUrl: rendered.finalUrl || crawl.startUrl,
+    statusCode: 200,
+    contentType: 'text/html',
+    responseMs: null,
+    sizeBytes: rendered.html.length,
+    redirectChain: [],
+    timedOut: false,
+    inconclusive: false,
+    ...fields,
+    isHtml: true,
+    internalLinks,
+    externalLinks,
+    renderedVisibleTextLength: fields.rawVisibleTextLength,
+  };
+  const rest = crawl.pages.filter(
+    (item) => item.url !== crawl.startUrl && item.finalUrl !== crawl.startUrl && item.finalUrl !== page.finalUrl
+  );
+  return { ...crawl, pages: [page, ...rest] };
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error('aborted'));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error('aborted'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  }).catch(() => undefined);
 }
 
 function header(headers: Record<string, string | string[] | undefined>, name: string): string | null {

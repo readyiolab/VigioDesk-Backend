@@ -1,5 +1,6 @@
 import { HEURISTICS } from './scoringConfig';
 import { pass, present, makeCheck } from './checkFactory';
+import { measurablePages } from './measurable';
 import {
   googlebotBlocked,
   isSitewideDisallowAll,
@@ -8,7 +9,7 @@ import {
 import type { AuditCheck, CrawlSnapshot, PageSnapshot } from './types';
 
 function htmlPages(snapshot: CrawlSnapshot): PageSnapshot[] {
-  return snapshot.pages.filter((page) => page.isHtml && !page.timedOut);
+  return measurablePages(snapshot);
 }
 
 function indexable(pages: PageSnapshot[]): PageSnapshot[] {

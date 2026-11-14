@@ -204,6 +204,10 @@ describe('AI search checks', () => {
     assert.equal(statusOf(noSchema, 'ai-structured-data'), 'present');
     const badSchema = runAiChecks(snapshot({}, [page({ schemaErrors: ['bad'] })]));
     assert.equal(statusOf(badSchema, 'ai-structured-data'), 'present');
+    const timedOutHtml = runAiChecks(
+      snapshot({}, [page({ isHtml: false, timedOut: true, statusCode: null, schemaTypes: [] })])
+    );
+    assert.equal(statusOf(timedOutHtml, 'ai-structured-data'), 'unavailable');
 
     const flat = runAiChecks(snapshot({}, [page({ headings: [{ level: 3, text: 'Skip' }], questionHeadingCount: 0, listCount: 0, tableCount: 0 })]));
     assert.equal(statusOf(flat, 'answer-structure'), 'present');

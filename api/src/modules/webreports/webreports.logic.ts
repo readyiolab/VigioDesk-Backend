@@ -188,6 +188,43 @@ export function createWebReportsService(deps: ServiceDeps) {
       return { reports, pagination: { limit, offset, total: page.total } };
     },
 
+    async history(userId: string, host: string, limit = 24) {
+      const normalizedHost = host
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .replace(/\/.*$/, '')
+        .replace(/^www\./, '');
+      if (!normalizedHost || normalizedHost.length > 253) {
+        throw new AppError('Invalid host', 400);
+      }
+      const capped = Math.min(Math.max(limit, 1), 50);
+      const rows = await deps.repo.listByHost(userId, normalizedHost, capped);
+      const ids = rows.map((r) => r.id);
+      const batchMap = ids.length > 0 ? await deps.repo.loadChildrenBatch(ids) : new Map();
+      const points = rows.map((row) => {
+        const children = batchMap.get(row.id) ?? { checks: [], perf: [] };
+        let errors = 0;
+        let warnings = 0;
+        for (const check of children.checks) {
+          if (check.status !== 'present' || check.severity === 'pass') continue;
+          if (check.severity === 'critical') errors += 1;
+          else if (check.severity === 'warning') warnings += 1;
+        }
+        return {
+          id: row.id,
+          scannedAt: (row.completedAt || row.createdAt).toISOString(),
+          seo: row.seoScore,
+          aiSearch: row.aiScore,
+          overall: row.overallScore,
+          pagesCrawled: row.pagesCrawled || 0,
+          errors,
+          warnings,
+        };
+      });
+      return { host: normalizedHost, points };
+    },
+
     async get(userId: string, id: string) {
       const row = await deps.repo.getById(id);
       if (!row || row.userId !== userId) throw new AppError('Report not found', 404);

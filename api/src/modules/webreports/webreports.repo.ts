@@ -114,6 +114,7 @@ export interface WebReportRepository {
   }): Promise<'quota' | 'concurrent' | StoredReport>;
   getById(id: string): Promise<StoredReport | null>;
   list(userId: string, limit: number, offset: number): Promise<{ rows: StoredReport[]; total: number }>;
+  listByHost(userId: string, normalizedHost: string, limit: number): Promise<StoredReport[]>;
   markFailed(id: string, message: string): Promise<void>;
   markEnqueued(id: string, when: Date): Promise<void>;
   refundQuota(userId: string): Promise<void>;
@@ -222,6 +223,20 @@ export const mysqlWebReportRepository: WebReportRepository = {
       [userId]
     );
     return { rows: rows.map(mapReport), total: Number(totalRow?.total || 0) };
+  },
+
+  async listByHost(userId, normalizedHost, limit) {
+    const apex = normalizedHost.replace(/^www\./i, '');
+    const www = apex.startsWith('www.') ? apex : `www.${apex}`;
+    const rows = await db.queryAll<RowDataPacket>(
+      `SELECT ${COLUMNS} FROM tbl_webreport
+        WHERE userId = ? AND status = 'completed'
+          AND (normalizedHost = ? OR normalizedHost = ?)
+        ORDER BY completedAt ASC, createdAt ASC, id ASC
+        LIMIT ?`,
+      [userId, apex, www, limit]
+    );
+    return rows.map(mapReport);
   },
 
   async markFailed(id, message) {

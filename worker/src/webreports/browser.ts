@@ -79,7 +79,12 @@ export async function launchBrowser(proxyPort: number, executablePath?: string):
   });
 }
 
-export async function renderedTextLength(browser: Browser, url: string, timeoutMs: number): Promise<number | null> {
+async function withSafePage<T>(
+  browser: Browser,
+  url: string,
+  timeoutMs: number,
+  fn: (page: Awaited<ReturnType<Browser['newPage']>>) => Promise<T>
+): Promise<T | null> {
   const page = await browser.newPage();
   try {
     await page.setRequestInterception(true);
@@ -100,14 +105,32 @@ export async function renderedTextLength(browser: Browser, url: string, timeoutM
       }
     });
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
-    const text = await page.evaluate(() => document.body?.innerText || '');
-    return text.replace(/\s+/g, ' ').trim().length;
+    return await fn(page);
   } catch (err) {
-    logger.warn({ err, url }, 'Rendered text measurement failed');
+    logger.warn({ err, url }, 'Browser page load failed');
     return null;
   } finally {
     await page.close().catch(() => undefined);
   }
+}
+
+export async function renderedTextLength(browser: Browser, url: string, timeoutMs: number): Promise<number | null> {
+  return withSafePage(browser, url, timeoutMs, async (page) => {
+    const text = await page.evaluate(() => document.body?.innerText || '');
+    return text.replace(/\s+/g, ' ').trim().length;
+  });
+}
+
+/** Full HTML for SEO fallback when raw HTTP crawl produced no measurable pages. */
+export async function fetchRenderedHtml(
+  browser: Browser,
+  url: string,
+  timeoutMs: number
+): Promise<{ html: string; finalUrl: string } | null> {
+  return withSafePage(browser, url, timeoutMs, async (page) => {
+    const html = await page.content();
+    return { html, finalUrl: page.url() || url };
+  });
 }
 
 export async function runLighthouse(

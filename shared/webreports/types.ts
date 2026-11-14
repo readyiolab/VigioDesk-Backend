@@ -237,6 +237,13 @@ export interface ReportContract {
   scannedAt: string | null;
   createdAt: string;
   pagesCrawled: number;
+  crawl?: {
+    pagesAttempted: number;
+    htmlPages: number;
+    timedOutPages: number;
+    sitemapSeeds: number;
+    seoSource?: 'http' | 'browser-fallback' | 'unavailable';
+  };
   completeness: Completeness;
   scores: ScoreBlock;
   scoringVersion: string;
@@ -267,6 +274,7 @@ export interface PublicReportContract {
   progress: number;
   scannedAt: string | null;
   pagesCrawled: number;
+  crawl?: ReportContract['crawl'];
   completeness: Completeness;
   scores: ScoreBlock;
   scoringVersion: string;

@@ -1,5 +1,6 @@
 import { HEURISTICS } from './scoringConfig';
 import { makeCheck, pass, present } from './checkFactory';
+import { measurablePages } from './measurable';
 import { AI_BOTS, type AiBot, type AuditCheck, type BotAccess, type CrawlSnapshot, type PageSnapshot } from './types';
 
 const SCHEMA_TYPES = ['Organization', 'WebSite', 'Product', 'Article', 'FAQPage', 'BreadcrumbList', 'Review'];
@@ -200,9 +201,24 @@ function jsCheck(snapshot: CrawlSnapshot): AuditCheck {
 }
 
 function schemaCoverage(snapshot: CrawlSnapshot): AuditCheck {
-  const types = new Set(snapshot.pages.flatMap((page) => page.schemaTypes));
+  const pages = measurablePages(snapshot);
+  if (!pages.length) {
+    return makeCheck({
+      id: 'ai-structured-data',
+      category: 'ai-search',
+      status: 'unavailable',
+      severity: 'info',
+      title: 'Structured data unavailable',
+      description: 'No measurable HTML pages were available to inspect for JSON-LD types.',
+      fix: 'Confirm the start URL returns HTML, then rescan.',
+      impact: 'medium',
+      effort: 'medium',
+      dedupeKey: 'schema',
+    });
+  }
+  const types = new Set(pages.flatMap((page) => page.schemaTypes));
   const found = SCHEMA_TYPES.filter((type) => types.has(type));
-  const errors = snapshot.pages.filter((page) => page.schemaErrors.length > 0);
+  const errors = pages.filter((page) => page.schemaErrors.length > 0);
   if (errors.length) {
     return present({
       id: 'ai-structured-data',

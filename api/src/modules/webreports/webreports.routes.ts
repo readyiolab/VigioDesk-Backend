@@ -3,7 +3,14 @@ import { authMiddleware, requireFullAccount, requireVerifiedEmail } from '../../
 import { validate } from '../../middleware/validate.middleware';
 import { webreportsCreateLimiter, webreportsPollLimiter } from '../../middleware/rateLimit.middleware';
 import { webreportsController } from './webreports.controller';
-import { createWebReportSchema, listWebReportsSchema, reportIdSchema, rescanSchema, updateBrandingSchema } from './webreports.types';
+import {
+  createWebReportSchema,
+  historyWebReportsSchema,
+  listWebReportsSchema,
+  reportIdSchema,
+  rescanSchema,
+  updateBrandingSchema,
+} from './webreports.types';
 
 const router = Router();
 
@@ -11,6 +18,7 @@ router.use(authMiddleware, requireFullAccount, requireVerifiedEmail);
 
 router.post('/', webreportsCreateLimiter, validate(createWebReportSchema), webreportsController.create);
 router.get('/', validate(listWebReportsSchema), webreportsController.list);
+router.get('/history', validate(historyWebReportsSchema), webreportsController.history);
 router.get('/schedules', webreportsController.listSchedules);
 router.post('/schedules', webreportsCreateLimiter, webreportsController.createSchedule);
 router.delete('/schedules/:scheduleId', webreportsController.deleteSchedule);

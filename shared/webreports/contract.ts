@@ -39,12 +39,21 @@ export interface ReportRow {
   customerBrandingJson?: string | null;
 }
 
+export interface CrawlStats {
+  pagesAttempted: number;
+  htmlPages: number;
+  timedOutPages: number;
+  sitemapSeeds: number;
+  seoSource?: 'http' | 'browser-fallback' | 'unavailable';
+}
+
 export interface ReportDetail {
   botAccess?: Record<string, BotAccess>;
   llmsTxt?: { present: boolean; status: string };
   manifest?: { present: boolean; status: string };
   humansTxt?: { present: boolean; status: string };
   jsRatio?: number | null;
+  crawl?: CrawlStats;
 }
 
 export interface StoredPerf {
@@ -122,6 +131,13 @@ export function toReportContract(input: {
     scannedAt: iso(input.row.completedAt),
     createdAt: iso(input.row.createdAt) || new Date(0).toISOString(),
     pagesCrawled: input.row.pagesCrawled || 0,
+    crawl: detail.crawl || {
+      pagesAttempted: input.row.pagesCrawled || 0,
+      htmlPages: input.row.pagesCrawled || 0,
+      timedOutPages: 0,
+      sitemapSeeds: 0,
+      seoSource: input.row.seoScore === null ? 'unavailable' : 'http',
+    },
     completeness: parseJson(input.row.completenessJson, {
       complete: false,
       unavailableSections: pending ? ['pending'] : [],
@@ -201,6 +217,7 @@ export function toPublicReport(report: ReportContract): PublicReportContract {
     progress: report.progress,
     scannedAt: report.scannedAt,
     pagesCrawled: report.pagesCrawled,
+    crawl: report.crawl,
     completeness: report.completeness,
     scores: report.scores,
     scoringVersion: report.scoringVersion,
