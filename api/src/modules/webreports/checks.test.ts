@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { runSeoChecks } from '../../../../shared/webreports/seoChecks';
 import { runAiChecks } from '../../../../shared/webreports/aiChecks';
 import { emptyBotAccess } from '../../../../shared/webreports/aiChecks';
+import { emptySearchBotAccess } from '../../../../shared/webreports/robotsPolicy';
 import type { CrawlSnapshot, PageSnapshot } from '../../../../shared/webreports/types';
 
 function page(overrides: Partial<PageSnapshot> = {}): PageSnapshot {
@@ -26,7 +27,7 @@ function page(overrides: Partial<PageSnapshot> = {}): PageSnapshot {
     robotsMeta: 'index,follow',
     viewport: 'width=device-width, initial-scale=1',
     hreflang: [],
-    openGraph: { title: 'Example', description: 'Example site' },
+    openGraph: { title: 'Example', description: 'Example site', image: 'https://example.com/og.png' },
     responseMs: 100,
     sizeBytes: 1000,
     redirectChain: [],
@@ -54,9 +55,16 @@ function snapshot(overrides: Partial<CrawlSnapshot> = {}, pages = [page()]): Cra
     startUrl: 'https://example.com/',
     origin: 'https://example.com',
     pages,
-    robots: { status: 'ok', body: 'User-agent: *\nAllow: /\n', sitemaps: [] },
+    robots: {
+      status: 'ok',
+      body: 'User-agent: *\nAllow: /\n\nSitemap: https://example.com/sitemap.xml\n',
+      sitemaps: ['https://example.com/sitemap.xml'],
+    },
     sitemap: { status: 'ok', urls: ['https://example.com/'], invalid: [], redirected: [] },
     llmsTxt: { present: true, httpStatus: 200, useful: true, hasHeadings: true, hasLinks: true, redirected: false },
+    manifest: { status: 'ok', httpStatus: 200, name: 'Example', hasIcons: true, useful: true },
+    humansTxt: { present: true, httpStatus: 200, useful: true },
+    searchBotAccess: emptySearchBotAccess('allowed'),
     botAccess: emptyBotAccess('allowed'),
     botPathNotes: [],
     ...overrides,
@@ -111,10 +119,53 @@ describe('SEO checks', () => {
     assert.equal(statusOf(runSeoChecks(snapshot({}, [page({ wordCount: 10 })])), 'thin-content'), 'present');
     assert.equal(statusOf(runSeoChecks(snapshot({}, [page({ hreflang: [{ lang: 'bad tag', href: 'https://example.com/en' }] })])), 'hreflang'), 'present');
     assert.equal(statusOf(runSeoChecks(snapshot({}, [page({ openGraph: {} })])), 'open-graph'), 'present');
+    assert.equal(statusOf(runSeoChecks(snapshot({}, [page({ openGraph: { title: 'T', description: 'D' } })])), 'og-image-missing'), 'present');
     assert.equal(statusOf(runSeoChecks(snapshot({}, [page({ schemaErrors: ['bad'] })])), 'structured-data-invalid'), 'present');
     assert.equal(statusOf(runSeoChecks(snapshot({ sitemap: { status: 'ok', urls: ['https://example.com/'], invalid: [], redirected: [] } }, [page({ robotsMeta: 'noindex' })])), 'noindex'), 'present');
     assert.equal(statusOf(runSeoChecks(snapshot({ sitemap: { status: 'ok', urls: ['https://example.com/'], invalid: [], redirected: [] } }, [page({ robotsMeta: 'noindex' })])), 'indexability-conflicts'), 'present');
     assert.equal(statusOf(runSeoChecks(snapshot({}, [page({ redirectChain: ['https://example.com/old', 'https://example.com/older'] })])), 'redirect-chains'), 'present');
+  });
+
+  it('flags robots policy, manifest, and humans.txt gaps', () => {
+    assert.equal(statusOf(healthy, 'robots-blocks-all'), 'absent');
+    assert.equal(statusOf(healthy, 'robots-blocks-googlebot'), 'absent');
+    assert.equal(statusOf(healthy, 'robots-missing-sitemap'), 'absent');
+    assert.equal(statusOf(healthy, 'web-manifest'), 'absent');
+    assert.equal(statusOf(healthy, 'humans-txt'), 'absent');
+    assert.equal(statusOf(healthy, 'og-image-missing'), 'absent');
+
+    const blockedAll = runSeoChecks(
+      snapshot({
+        robots: { status: 'ok', body: 'User-agent: *\nDisallow: /\n', sitemaps: [] },
+        searchBotAccess: emptySearchBotAccess('blocked'),
+        sitemap: { status: 'missing', urls: [], invalid: [], redirected: [] },
+      })
+    );
+    assert.equal(statusOf(blockedAll, 'robots-blocks-all'), 'present');
+    assert.equal(statusOf(blockedAll, 'robots-blocks-googlebot'), 'present');
+    assert.equal(statusOf(blockedAll, 'robots-missing-sitemap'), 'present');
+
+    assert.equal(
+      statusOf(
+        runSeoChecks(snapshot({ manifest: { status: 'missing', httpStatus: 404, name: null, hasIcons: false, useful: false } })),
+        'web-manifest'
+      ),
+      'present'
+    );
+    assert.equal(
+      statusOf(
+        runSeoChecks(snapshot({ manifest: { status: 'invalid', httpStatus: 200, name: null, hasIcons: false, useful: false } })),
+        'web-manifest'
+      ),
+      'present'
+    );
+    assert.equal(
+      statusOf(
+        runSeoChecks(snapshot({ humansTxt: { present: false, httpStatus: 404, useful: false } })),
+        'humans-txt'
+      ),
+      'present'
+    );
   });
 
   it('is unavailable when no HTML was fetched', () => {
@@ -129,6 +180,8 @@ describe('AI search checks', () => {
     assert.equal(statusOf(healthy, 'llms-txt'), 'absent');
     assert.equal(statusOf(healthy, 'js-render-dependency'), 'absent');
     assert.equal(statusOf(healthy, 'ai-structured-data'), 'absent');
+    assert.equal(statusOf(healthy, 'organization-schema'), 'absent');
+    assert.equal(statusOf(healthy, 'faq-schema'), 'absent');
     assert.equal(statusOf(healthy, 'answer-structure'), 'absent');
     assert.equal(statusOf(healthy, 'trust-signals'), 'absent');
 
@@ -160,5 +213,12 @@ describe('AI search checks', () => {
 
     const lowTrust = runAiChecks(snapshot({}, [page({ author: null, published: null, modified: null, hasAboutLink: false, hasContactLink: false, schemaTypes: [] })]));
     assert.equal(statusOf(lowTrust, 'trust-signals'), 'present');
+
+    const noOrg = runAiChecks(snapshot({}, [page({ schemaTypes: [] })]));
+    assert.equal(statusOf(noOrg, 'organization-schema'), 'present');
+    const faqGap = runAiChecks(snapshot({}, [page({ questionHeadingCount: 4, schemaTypes: ['Organization'] })]));
+    assert.equal(statusOf(faqGap, 'faq-schema'), 'present');
+    const faqOk = runAiChecks(snapshot({}, [page({ questionHeadingCount: 4, schemaTypes: ['Organization', 'FAQPage'] })]));
+    assert.equal(statusOf(faqOk, 'faq-schema'), 'absent');
   });
 });

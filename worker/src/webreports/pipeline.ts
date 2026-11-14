@@ -15,7 +15,7 @@ import type { CrawlSnapshot, PageSnapshot } from '../../../shared/webreports/typ
 import { env } from './env';
 import { logger } from './runtime';
 import { parseHtml } from './parsePage';
-import { evaluateBotAccess, isAllowedByRobots, sitemapsFromRobots } from './robotsEval';
+import { evaluateBotAccess, evaluateSearchBotAccess, isAllowedByRobots, sitemapsFromRobots } from './robotsEval';
 import { startSsrfProxy } from './proxy';
 import { launchBrowser, renderedTextLength, runDeviceSet } from './browser';
 import { fetchFieldData, mergeField } from './psi';
@@ -119,6 +119,21 @@ export async function runPipeline(reportId: string, generation: number, jobId: s
         present: crawl.llmsTxt.present && crawl.llmsTxt.useful,
         status: crawl.llmsTxt.httpStatus === null ? 'unavailable' : crawl.llmsTxt.present ? 'present' : 'missing',
       },
+      manifest: {
+        present: crawl.manifest.status === 'ok',
+        status: crawl.manifest.status,
+      },
+      humansTxt: {
+        present: crawl.humansTxt.present && crawl.humansTxt.useful,
+        status:
+          crawl.humansTxt.httpStatus === null
+            ? 'unavailable'
+            : crawl.humansTxt.useful
+              ? 'present'
+              : crawl.humansTxt.present
+                ? 'thin'
+                : 'missing',
+      },
       jsRatio: ratioPage
         ? jsRenderRatio(ratioPage.rawVisibleTextLength, ratioPage.renderedVisibleTextLength || 1)
         : null,
@@ -130,7 +145,14 @@ export async function runPipeline(reportId: string, generation: number, jobId: s
       scores: { overall: combined.overall, ...scores },
       completeness: combined.completeness,
       seo: { checks: seo },
-      aiSearch: { checks: ai, botAccess: detail.botAccess, llmsTxt: detail.llmsTxt, jsDependency: { rawVsRenderedRatio: detail.jsRatio, status: 'absent' as const } },
+      aiSearch: {
+        checks: ai,
+        botAccess: detail.botAccess,
+        llmsTxt: detail.llmsTxt,
+        manifest: detail.manifest,
+        humansTxt: detail.humansTxt,
+        jsDependency: { rawVsRenderedRatio: detail.jsRatio, status: 'absent' as const },
+      },
       performance: { mobile, desktop },
     };
     const summary = signal.aborted
@@ -201,8 +223,12 @@ async function collectCrawl(startUrl: string, maxPages: number, signal: AbortSig
   const robotsBody = robotsStatus === 'ok' ? robots?.body || '' : null;
   const seeds = await sitemapSeeds(origin, robotsBody, robots?.body || '', signal);
   const botPaths = [startUrl, ...seeds.slice(0, 3)];
-  const bots = evaluateBotAccess(robotsBody, robotsStatus === 'ok' ? 'ok' : robotsStatus, origin, botPaths);
+  const robotsStatusNorm = robotsStatus === 'ok' ? 'ok' : robotsStatus;
+  const bots = evaluateBotAccess(robotsBody, robotsStatusNorm, origin, botPaths);
+  const searchBots = evaluateSearchBotAccess(robotsBody, robotsStatusNorm, origin, botPaths);
   const llms = await fetchText(`${origin}/llms.txt`, signal);
+  const manifestFile = await fetchText(`${origin}/manifest.json`, signal);
+  const humansFile = await fetchText(`${origin}/humans.txt`, signal);
   const pages = await crawlSite({
     startUrl,
     origin,
@@ -221,14 +247,17 @@ async function collectCrawl(startUrl: string, maxPages: number, signal: AbortSig
     origin,
     pages: pages.pages,
     robots: {
-      status: robotsStatus === 'ok' ? 'ok' : robotsStatus,
+      status: robotsStatusNorm,
       body: robotsBody,
       sitemaps: robotsBody ? sitemapsFromRobots(robotsBody) : [],
     },
     sitemap: sitemapState,
     llmsTxt: describeLlms(llms),
+    manifest: describeManifest(manifestFile),
+    humansTxt: describeHumans(humansFile),
+    searchBotAccess: searchBots.access,
     botAccess: bots.access,
-    botPathNotes: bots.notes,
+    botPathNotes: [...bots.notes, ...searchBots.notes].slice(0, 12),
   };
 }
 
@@ -252,6 +281,59 @@ function describeLlms(result: { status: number; body: string; finalUrl: string }
     hasLinks: /https?:\/\//.test(text),
     redirected: result.finalUrl.endsWith('/llms.txt') ? false : true,
   };
+}
+
+function describeManifest(result: { status: number; body: string; finalUrl: string } | null) {
+  if (!result) {
+    return { status: 'unavailable' as const, httpStatus: null, name: null, hasIcons: false, useful: false };
+  }
+  if (result.status === 404) {
+    return { status: 'missing' as const, httpStatus: 404, name: null, hasIcons: false, useful: false };
+  }
+  if (result.status >= 400) {
+    return {
+      status: 'unavailable' as const,
+      httpStatus: result.status,
+      name: null,
+      hasIcons: false,
+      useful: false,
+    };
+  }
+  const text = result.body.trim();
+  if (!text || text.startsWith('<')) {
+    return { status: 'invalid' as const, httpStatus: result.status, name: null, hasIcons: false, useful: false };
+  }
+  try {
+    const json = JSON.parse(text) as { name?: string; short_name?: string; icons?: unknown[] };
+    const name = (json.name || json.short_name || '').trim() || null;
+    const hasIcons = Array.isArray(json.icons) && json.icons.length > 0;
+    const useful = Boolean(name);
+    return {
+      status: useful ? ('ok' as const) : ('invalid' as const),
+      httpStatus: result.status,
+      name,
+      hasIcons,
+      useful,
+    };
+  } catch {
+    return { status: 'invalid' as const, httpStatus: result.status, name: null, hasIcons: false, useful: false };
+  }
+}
+
+function describeHumans(result: { status: number; body: string; finalUrl: string } | null) {
+  if (!result) return { present: false, httpStatus: null, useful: false };
+  const text = result.body.trim();
+  const present =
+    result.status < 400 &&
+    text.length > 0 &&
+    !text.startsWith('<!DOCTYPE') &&
+    !text.startsWith('<html') &&
+    !text.startsWith('<');
+  const useful =
+    present &&
+    text.length > 20 &&
+    (text.split(/\r?\n/).filter(Boolean).length >= 3 || /TEAM|SITE|contact|https?:\/\/|@/i.test(text));
+  return { present, httpStatus: result.status, useful };
 }
 
 async function sitemapSeeds(origin: string, robotsBody: string | null, rawRobots: string, signal: AbortSignal): Promise<string[]> {

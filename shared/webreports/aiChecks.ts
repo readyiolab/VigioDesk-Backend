@@ -10,6 +10,8 @@ export function runAiChecks(snapshot: CrawlSnapshot): AuditCheck[] {
   checks.push(llmsCheck(snapshot));
   checks.push(jsCheck(snapshot));
   checks.push(schemaCoverage(snapshot));
+  checks.push(organizationSchemaCheck(snapshot));
+  checks.push(faqSchemaCheck(snapshot));
   checks.push(answerStructure(snapshot));
   checks.push(trustSignals(snapshot));
   return checks;
@@ -238,6 +240,110 @@ function schemaCoverage(snapshot: CrawlSnapshot): AuditCheck {
     description: `Found ${found.join(', ')}. This confirms parseable types, not correctness or rich-result eligibility.`,
     fix: 'Keep the markup consistent with the visible page.',
     impact: 'medium',
+    effort: 'medium',
+    dedupeKey: 'schema',
+  });
+}
+
+function homepagePage(snapshot: CrawlSnapshot): PageSnapshot | undefined {
+  const pages = snapshot.pages.filter((page) => page.isHtml);
+  return (
+    pages.find((page) => page.finalUrl === snapshot.startUrl || page.url === snapshot.startUrl) ||
+    pages.find((page) => {
+      try {
+        const path = new URL(page.finalUrl).pathname;
+        return path === '/' || path === '';
+      } catch {
+        return false;
+      }
+    }) ||
+    pages[0]
+  );
+}
+
+function organizationSchemaCheck(snapshot: CrawlSnapshot): AuditCheck {
+  const home = homepagePage(snapshot);
+  if (!home) {
+    return makeCheck({
+      id: 'organization-schema',
+      category: 'ai-search',
+      status: 'unavailable',
+      severity: 'info',
+      title: 'Organization schema unavailable',
+      description: 'No HTML homepage was available to check for Organization or WebSite JSON-LD.',
+      fix: 'Ensure the start URL returns HTML.',
+      impact: 'medium',
+      effort: 'medium',
+      dedupeKey: 'schema',
+    });
+  }
+  const types = new Set(home.schemaTypes);
+  if (types.has('Organization') || types.has('WebSite')) {
+    return pass({
+      id: 'organization-schema',
+      category: 'ai-search',
+      title: 'Homepage has Organization or WebSite schema',
+      description: `Homepage JSON-LD includes ${[...types].filter((t) => t === 'Organization' || t === 'WebSite').join(', ')}.`,
+      fix: 'Keep name and url consistent with the visible brand.',
+      impact: 'medium',
+      effort: 'medium',
+      dedupeKey: 'schema',
+    });
+  }
+  return present({
+    id: 'organization-schema',
+    category: 'ai-search',
+    severity: 'info',
+    title: 'Homepage missing Organization / WebSite schema',
+    description: 'The homepage does not declare Organization or WebSite JSON-LD, which helps answer engines attribute the brand.',
+    affectedUrls: [home.finalUrl],
+    affectedCount: 1,
+    fix: 'Add Organization and/or WebSite JSON-LD on the homepage with name and url.',
+    impact: 'medium',
+    effort: 'medium',
+    dedupeKey: 'schema',
+  });
+}
+
+function faqSchemaCheck(snapshot: CrawlSnapshot): AuditCheck {
+  const faqShaped = snapshot.pages.filter(
+    (page) => page.isHtml && page.statusCode && page.statusCode < 400 && page.questionHeadingCount >= 3
+  );
+  if (!faqShaped.length) {
+    return pass({
+      id: 'faq-schema',
+      category: 'ai-search',
+      title: 'No FAQ-shaped pages needing FAQPage schema',
+      description: 'No crawled page had three or more question-style headings, so FAQPage markup was not required.',
+      fix: 'When you publish FAQ content, mark it up with FAQPage JSON-LD that matches visible Q&A.',
+      impact: 'low',
+      effort: 'medium',
+      dedupeKey: 'schema',
+    });
+  }
+  const missing = faqShaped.filter((page) => !page.schemaTypes.includes('FAQPage'));
+  if (!missing.length) {
+    return pass({
+      id: 'faq-schema',
+      category: 'ai-search',
+      title: 'FAQ-shaped pages include FAQPage schema',
+      description: 'Pages with multiple question headings also declare FAQPage JSON-LD.',
+      fix: 'Keep FAQPage mainEntity in sync with visible questions.',
+      impact: 'low',
+      effort: 'medium',
+      dedupeKey: 'schema',
+    });
+  }
+  return present({
+    id: 'faq-schema',
+    category: 'ai-search',
+    severity: 'info',
+    title: 'FAQ-shaped pages lack FAQPage schema',
+    description: 'Pages look like FAQs (multiple question headings) but do not declare FAQPage JSON-LD.',
+    affectedUrls: missing.map((page) => page.finalUrl),
+    affectedCount: missing.length,
+    fix: 'Add FAQPage JSON-LD that mirrors the visible questions and answers.',
+    impact: 'low',
     effort: 'medium',
     dedupeKey: 'schema',
   });

@@ -6,6 +6,14 @@ const EFFORT_RANK = { easy: 0, medium: 1, hard: 2 };
 
 const SNIPPETS: Record<string, string> = {
   'ai-bot-access': `User-agent: GPTBot\nAllow: /\n\nUser-agent: OAI-SearchBot\nAllow: /`,
+  'robots-blocks-all': `User-agent: *\nAllow: /\n\nSitemap: https://example.com/sitemap.xml`,
+  'robots-blocks-googlebot': `User-agent: Googlebot\nAllow: /\n\nUser-agent: *\nAllow: /`,
+  'robots-missing-sitemap': `Sitemap: https://example.com/sitemap.xml`,
+  'web-manifest': `{\n  "name": "Example",\n  "short_name": "Example",\n  "start_url": "/",\n  "display": "standalone",\n  "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]\n}`,
+  'humans-txt': `/* TEAM */\nSite: Example\nURL: https://example.com`,
+  'og-image-missing': `<meta property="og:image" content="https://example.com/og.png">`,
+  'organization-schema': `{\n  "@context": "https://schema.org",\n  "@type": "Organization",\n  "name": "Example",\n  "url": "https://example.com"\n}`,
+  'faq-schema': `{\n  "@context": "https://schema.org",\n  "@type": "FAQPage",\n  "mainEntity": [{\n    "@type": "Question",\n    "name": "Example question?",\n    "acceptedAnswer": { "@type": "Answer", "text": "Example answer." }\n  }]\n}`,
   'missing-titles': `<title>Specific page title</title>`,
   'canonical-missing': `<link rel="canonical" href="https://example.com/page">`,
   'insecure-canonical': `<link rel="canonical" href="https://example.com/page">`,

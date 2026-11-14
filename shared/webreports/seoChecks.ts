@@ -1,5 +1,10 @@
 import { HEURISTICS } from './scoringConfig';
 import { pass, present, makeCheck } from './checkFactory';
+import {
+  googlebotBlocked,
+  isSitewideDisallowAll,
+  robotsHasSitemapDirective,
+} from './robotsPolicy';
 import type { AuditCheck, CrawlSnapshot, PageSnapshot } from './types';
 
 function htmlPages(snapshot: CrawlSnapshot): PageSnapshot[] {
@@ -550,6 +555,10 @@ export function runSeoChecks(snapshot: CrawlSnapshot): AuditCheck[] {
     );
   }
 
+  checks.push(...robotsPolicyChecks(snapshot));
+  checks.push(webManifestCheck(snapshot));
+  checks.push(humansTxtCheck(snapshot));
+
   const noindex = pages.filter((page) => /noindex/i.test(page.robotsMeta || ''));
   checks.push(
     noindex.length
@@ -710,9 +719,235 @@ export function runSeoChecks(snapshot: CrawlSnapshot): AuditCheck[] {
 
   checks.push(hreflangCheck(ok));
   checks.push(openGraphCheck(ok));
+  checks.push(ogImageCheck(ok));
   checks.push(schemaCheck(pages));
   checks.push(indexabilityCheck(snapshot, pages));
   return checks;
+}
+
+function robotsPolicyChecks(snapshot: CrawlSnapshot): AuditCheck[] {
+  const checks: AuditCheck[] = [];
+  const sitewide = isSitewideDisallowAll(snapshot.robots.body);
+  if (sitewide) {
+    checks.push(
+      present({
+        id: 'robots-blocks-all',
+        category: 'seo',
+        severity: 'critical',
+        title: 'robots.txt blocks all crawlers sitewide',
+        description: 'User-agent: * includes Disallow: /, which tells crawlers not to fetch any path.',
+        affectedUrls: [`${snapshot.origin}/robots.txt`],
+        affectedCount: 1,
+        fix: 'Remove the sitewide Disallow: / unless the entire origin should stay out of search.',
+        impact: 'high',
+        effort: 'easy',
+        dedupeKey: 'robots-policy',
+      })
+    );
+  } else {
+    checks.push(
+      pass({
+        id: 'robots-blocks-all',
+        category: 'seo',
+        title: 'No sitewide Disallow: / for *',
+        description: 'robots.txt does not block every path for User-agent: *.',
+        fix: 'Keep Disallow rules specific to private paths.',
+        impact: 'high',
+        effort: 'easy',
+        dedupeKey: 'robots-policy',
+      })
+    );
+  }
+
+  if (googlebotBlocked(snapshot)) {
+    checks.push(
+      present({
+        id: 'robots-blocks-googlebot',
+        category: 'seo',
+        severity: 'critical',
+        title: 'Googlebot is blocked on the homepage',
+        description: 'Googlebot or User-agent: * disallows the homepage, so Google may not crawl the start URL.',
+        affectedUrls: [snapshot.startUrl],
+        affectedCount: 1,
+        fix: 'Allow Googlebot (and *) on public URLs you want indexed.',
+        impact: 'high',
+        effort: 'easy',
+        dedupeKey: 'robots-googlebot',
+      })
+    );
+  } else if (snapshot.searchBotAccess?.Googlebot === 'unavailable') {
+    checks.push(
+      makeCheck({
+        id: 'robots-blocks-googlebot',
+        category: 'seo',
+        status: 'unavailable',
+        severity: 'info',
+        title: 'Googlebot rules unavailable',
+        description: 'robots.txt could not be fetched, so Googlebot access was not inferred.',
+        fix: 'Serve robots.txt over HTTPS with a 200 response.',
+        impact: 'high',
+        effort: 'easy',
+        dedupeKey: 'robots-googlebot',
+      })
+    );
+  } else {
+    checks.push(
+      pass({
+        id: 'robots-blocks-googlebot',
+        category: 'seo',
+        title: 'Homepage is not blocked for Googlebot',
+        description: 'Googlebot is allowed or unspecified on the homepage.',
+        fix: 'Add an explicit Googlebot allow only if you want a documented policy.',
+        impact: 'high',
+        effort: 'easy',
+        dedupeKey: 'robots-googlebot',
+      })
+    );
+  }
+
+  const hasSitemapLine = robotsHasSitemapDirective(snapshot.robots.body);
+  const sitemapMissing =
+    snapshot.sitemap.status === 'missing' || snapshot.sitemap.status === 'failed';
+  if (snapshot.robots.status === 'ok' && !hasSitemapLine && sitemapMissing) {
+    checks.push(
+      present({
+        id: 'robots-missing-sitemap',
+        category: 'seo',
+        severity: 'info',
+        title: 'No Sitemap directive and no sitemap found',
+        description: 'robots.txt has no Sitemap: line and /sitemap.xml was not usable.',
+        affectedUrls: [`${snapshot.origin}/robots.txt`],
+        affectedCount: 1,
+        fix: 'Publish a sitemap and reference it with a Sitemap: line in robots.txt.',
+        impact: 'low',
+        effort: 'easy',
+      })
+    );
+  } else {
+    checks.push(
+      pass({
+        id: 'robots-missing-sitemap',
+        category: 'seo',
+        title: 'Sitemap discovery looks fine',
+        description: hasSitemapLine
+          ? 'robots.txt declares at least one Sitemap: URL.'
+          : 'A sitemap was found or robots.txt was not required for discovery.',
+        fix: 'Keep Sitemap: lines pointed at canonical XML sitemaps.',
+        impact: 'low',
+        effort: 'easy',
+      })
+    );
+  }
+
+  return checks;
+}
+
+function webManifestCheck(snapshot: CrawlSnapshot): AuditCheck {
+  const file = snapshot.manifest;
+  if (!file || file.status === 'unavailable') {
+    return makeCheck({
+      id: 'web-manifest',
+      category: 'seo',
+      status: 'unavailable',
+      severity: 'info',
+      title: 'Web app manifest unavailable',
+      description: '/manifest.json could not be fetched.',
+      fix: 'Serve a valid Web App Manifest at /manifest.json when you want install/PWA metadata.',
+      impact: 'low',
+      effort: 'easy',
+    });
+  }
+  if (file.status === 'missing') {
+    return present({
+      id: 'web-manifest',
+      category: 'seo',
+      severity: 'info',
+      title: 'Web app manifest missing',
+      description: '/manifest.json was not found. A manifest helps browsers and some crawlers understand the app name and icons.',
+      affectedUrls: [`${snapshot.origin}/manifest.json`],
+      affectedCount: 1,
+      fix: 'Publish a JSON manifest with name (or short_name) and icons, and link it from HTML.',
+      impact: 'low',
+      effort: 'easy',
+    });
+  }
+  if (file.status === 'invalid' || !file.useful) {
+    return present({
+      id: 'web-manifest',
+      category: 'seo',
+      severity: 'warning',
+      title: 'Web app manifest invalid',
+      description: '/manifest.json responded but was not valid JSON with a name or short_name.',
+      affectedUrls: [`${snapshot.origin}/manifest.json`],
+      affectedCount: 1,
+      fix: 'Fix JSON syntax and set name or short_name. Prefer an icons array for branding.',
+      impact: 'low',
+      effort: 'easy',
+    });
+  }
+  return pass({
+    id: 'web-manifest',
+    category: 'seo',
+    title: 'Web app manifest present',
+    description: `manifest.json declares ${file.name || 'a name'}${file.hasIcons ? ' with icons' : ''}.`,
+    fix: 'Keep the manifest linked from HTML and icons absolute or same-origin.',
+    impact: 'low',
+    effort: 'easy',
+  });
+}
+
+function humansTxtCheck(snapshot: CrawlSnapshot): AuditCheck {
+  const file = snapshot.humansTxt;
+  if (!file || file.httpStatus === null) {
+    return makeCheck({
+      id: 'humans-txt',
+      category: 'seo',
+      status: 'unavailable',
+      severity: 'info',
+      title: 'humans.txt unavailable',
+      description: '/humans.txt could not be fetched. The file is optional credits metadata.',
+      fix: 'Optionally publish a short humans.txt describing the team and site.',
+      impact: 'low',
+      effort: 'easy',
+    });
+  }
+  if (!file.present) {
+    return present({
+      id: 'humans-txt',
+      category: 'seo',
+      severity: 'info',
+      title: 'humans.txt is not present',
+      description: '/humans.txt was missing. This is a lightweight trust/credits convention, not a ranking requirement.',
+      affectedUrls: [`${snapshot.origin}/humans.txt`],
+      affectedCount: 1,
+      fix: 'Optionally add a humans.txt with team and site credits.',
+      impact: 'low',
+      effort: 'easy',
+    });
+  }
+  if (!file.useful) {
+    return present({
+      id: 'humans-txt',
+      category: 'seo',
+      severity: 'info',
+      title: 'humans.txt has little usable text',
+      description: 'The file responded but did not include enough structured credits content.',
+      affectedUrls: [`${snapshot.origin}/humans.txt`],
+      affectedCount: 1,
+      fix: 'Add TEAM / SITE sections or contact links.',
+      impact: 'low',
+      effort: 'easy',
+    });
+  }
+  return pass({
+    id: 'humans-txt',
+    category: 'seo',
+    title: 'humans.txt is present',
+    description: '/humans.txt returned useful credits text.',
+    fix: 'Keep contact and site credits up to date.',
+    impact: 'low',
+    effort: 'easy',
+  });
 }
 
 function isAbsoluteHttp(value: string): boolean {
@@ -797,6 +1032,7 @@ function openGraphCheck(pages: PageSnapshot[]): AuditCheck {
       fix: 'Add og:title, og:description, and og:image for URLs that are shared.',
       impact: 'low',
       effort: 'easy',
+      dedupeKey: 'open-graph',
     });
   }
   return pass({
@@ -807,6 +1043,38 @@ function openGraphCheck(pages: PageSnapshot[]): AuditCheck {
     fix: 'Use a unique image and title for important URLs.',
     impact: 'low',
     effort: 'easy',
+    dedupeKey: 'open-graph',
+  });
+}
+
+function ogImageCheck(pages: PageSnapshot[]): AuditCheck {
+  const withText = pages.filter((page) => page.openGraph.title || page.openGraph.description);
+  const candidates = (withText.length ? withText : pages).slice(0, 5);
+  const missing = candidates.filter((page) => !page.openGraph.image?.trim());
+  if (missing.length) {
+    return present({
+      id: 'og-image-missing',
+      category: 'seo',
+      severity: 'info',
+      title: 'og:image missing on key pages',
+      description: 'Important pages lack og:image, so social and chat previews may show a weak or empty image.',
+      affectedUrls: missing.map((page) => page.finalUrl),
+      affectedCount: missing.length,
+      fix: 'Add an absolute og:image (ideally 1200×630) on shared landing pages.',
+      impact: 'low',
+      effort: 'easy',
+      dedupeKey: 'open-graph',
+    });
+  }
+  return pass({
+    id: 'og-image-missing',
+    category: 'seo',
+    title: 'og:image present on sampled pages',
+    description: 'Sampled pages that declare Open Graph text also set og:image.',
+    fix: 'Keep preview images absolute HTTPS URLs.',
+    impact: 'low',
+    effort: 'easy',
+    dedupeKey: 'open-graph',
   });
 }
 

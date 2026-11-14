@@ -42,6 +42,8 @@ export interface ReportRow {
 export interface ReportDetail {
   botAccess?: Record<string, BotAccess>;
   llmsTxt?: { present: boolean; status: string };
+  manifest?: { present: boolean; status: string };
+  humansTxt?: { present: boolean; status: string };
   jsRatio?: number | null;
 }
 
@@ -144,6 +146,8 @@ export function toReportContract(input: {
     aiSearch: {
       botAccess: detail.botAccess || {},
       llmsTxt: detail.llmsTxt || { present: false, status: 'unavailable' },
+      manifest: detail.manifest || { present: false, status: 'unavailable' },
+      humansTxt: detail.humansTxt || { present: false, status: 'unavailable' },
       jsDependency: {
         rawVsRenderedRatio: detail.jsRatio ?? null,
         status: js?.status || 'unavailable',

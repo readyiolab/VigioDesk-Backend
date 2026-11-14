@@ -138,6 +138,23 @@ export interface CrawlSnapshot {
     hasLinks: boolean;
     redirected: boolean;
   };
+  manifest: {
+    status: 'ok' | 'missing' | 'invalid' | 'unavailable';
+    httpStatus: number | null;
+    name: string | null;
+    hasIcons: boolean;
+    useful: boolean;
+  };
+  humansTxt: {
+    present: boolean;
+    httpStatus: number | null;
+    useful: boolean;
+  };
+  /** Googlebot + wildcard search crawler access on the homepage. */
+  searchBotAccess: {
+    Googlebot: BotAccess;
+    '*': BotAccess;
+  };
   botAccess: Record<AiBot, BotAccess>;
   /** Paths whose bot result differs from the homepage result. */
   botPathNotes: string[];
@@ -229,6 +246,8 @@ export interface ReportContract {
   aiSearch: {
     botAccess: Record<string, BotAccess>;
     llmsTxt: { present: boolean; status: string };
+    manifest: { present: boolean; status: string };
+    humansTxt: { present: boolean; status: string };
     jsDependency: { rawVsRenderedRatio: number | null; status: CheckStatus };
     checks: AuditCheck[];
   };
