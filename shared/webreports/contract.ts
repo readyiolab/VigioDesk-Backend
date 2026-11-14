@@ -224,7 +224,7 @@ function resolveBranding(row: ReportRow) {
 
   return {
     companyName,
-    logoUrl: row.customerLogoUrl || `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
+    logoUrl: row.customerLogoUrl || `https://icons.duckduckgo.com/ip3/${domain}.ico`,
     domain,
     source,
   };
