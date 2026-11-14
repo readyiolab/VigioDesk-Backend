@@ -38,6 +38,60 @@ export const historyByReportSchema = z.object({
   params: z.object({ id: uuid }),
 });
 
+export const integrationProviderSchema = z.object({
+  body: z.object({}).optional().default({}),
+  query: z.object({}).optional().default({}),
+  params: z.object({
+    provider: z.enum(['google_analytics', 'google_search_console', 'backlinks']),
+  }),
+});
+
+export const integrationGoogleProviderSchema = z.object({
+  body: z.object({}).optional().default({}),
+  query: z.object({}).optional().default({}),
+  params: z.object({
+    provider: z.enum(['google_analytics', 'google_search_console']),
+  }),
+});
+
+export const integrationExchangeSchema = z.object({
+  body: z.object({
+    code: z.string().min(1),
+    state: z.string().min(1),
+  }),
+  query: z.object({}).optional().default({}),
+  params: z.object({}).optional().default({}),
+});
+
+export const integrationPropertySchema = z.object({
+  body: z.object({
+    propertyId: z.string().trim().min(1).max(512),
+    propertyLabel: z.string().trim().max(512).optional(),
+  }),
+  query: z.object({}).optional().default({}),
+  params: z.object({
+    provider: z.enum(['google_analytics', 'google_search_console']),
+  }),
+});
+
+export const integrationBacklinksSchema = z.object({
+  body: z.object({
+    login: z.string().trim().min(1).max(200),
+    password: z.string().trim().min(1).max(200),
+  }),
+  query: z.object({}).optional().default({}),
+  params: z.object({}).optional().default({}),
+});
+
+export const integrationMetricsSchema = z.object({
+  body: z.object({}).optional().default({}),
+  query: z.object({
+    host: z.string().trim().min(1).max(253).optional(),
+    url: z.string().trim().min(1).max(2048).optional(),
+  }),
+  params: z.object({}).optional().default({}),
+});
+
 export const reportIdSchema = z.object({
   body: z.object({}).optional().default({}),
   query: z.object({}).optional().default({}),

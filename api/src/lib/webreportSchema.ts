@@ -146,4 +146,23 @@ export async function initializeWebReportSchema(conn: PoolConnection): Promise<v
       CONSTRAINT fk_webreport_schedule_user FOREIGN KEY (userId) REFERENCES tbl_user(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
+
+  await conn.query(`
+    CREATE TABLE IF NOT EXISTS tbl_webreport_integration (
+      id VARCHAR(255) PRIMARY KEY,
+      userId VARCHAR(255) NOT NULL,
+      provider VARCHAR(40) NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'connected',
+      accountEmail VARCHAR(255) NULL,
+      propertyId VARCHAR(512) NULL,
+      propertyLabel VARCHAR(512) NULL,
+      encryptedSecrets TEXT NOT NULL,
+      metaJson JSON NULL,
+      createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+      updatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+      UNIQUE KEY uq_webreport_integration_user_provider (userId, provider),
+      INDEX idx_webreport_integration_user (userId),
+      CONSTRAINT fk_webreport_integration_user FOREIGN KEY (userId) REFERENCES tbl_user(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  `);
 }

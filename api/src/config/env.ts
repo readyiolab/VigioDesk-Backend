@@ -210,6 +210,9 @@ const envSchema = z.object({
   WEBREPORTS_WEIGHT_DESKTOP: z.coerce.number().optional(),
   WEBREPORTS_WEIGHT_SEO: z.coerce.number().optional(),
   WEBREPORTS_WEIGHT_AI: z.coerce.number().optional(),
+  // DataForSEO platform credentials for Web Reports backlink metrics (optional).
+  DATAFORSEO_LOGIN: z.string().optional(),
+  DATAFORSEO_PASSWORD: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

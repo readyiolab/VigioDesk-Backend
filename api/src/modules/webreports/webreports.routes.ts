@@ -3,10 +3,17 @@ import { authMiddleware, requireFullAccount, requireVerifiedEmail } from '../../
 import { validate } from '../../middleware/validate.middleware';
 import { webreportsCreateLimiter, webreportsPollLimiter } from '../../middleware/rateLimit.middleware';
 import { webreportsController } from './webreports.controller';
+import { webreportsIntegrationsController } from './integrations.controller';
 import {
   createWebReportSchema,
   historyByReportSchema,
   historyWebReportsSchema,
+  integrationBacklinksSchema,
+  integrationExchangeSchema,
+  integrationGoogleProviderSchema,
+  integrationMetricsSchema,
+  integrationPropertySchema,
+  integrationProviderSchema,
   listWebReportsSchema,
   reportIdSchema,
   rescanSchema,
@@ -23,6 +30,32 @@ router.get('/history', validate(historyWebReportsSchema), webreportsController.h
 router.get('/schedules', webreportsController.listSchedules);
 router.post('/schedules', webreportsCreateLimiter, webreportsController.createSchedule);
 router.delete('/schedules/:scheduleId', webreportsController.deleteSchedule);
+
+router.get('/integrations', webreportsIntegrationsController.status);
+router.get('/integrations/metrics', validate(integrationMetricsSchema), webreportsIntegrationsController.metrics);
+router.get(
+  '/integrations/:provider/authorize',
+  validate(integrationGoogleProviderSchema),
+  webreportsIntegrationsController.authorize
+);
+router.post('/integrations/exchange', validate(integrationExchangeSchema), webreportsIntegrationsController.exchange);
+router.delete(
+  '/integrations/:provider',
+  validate(integrationProviderSchema),
+  webreportsIntegrationsController.disconnect
+);
+router.post('/integrations/backlinks', validate(integrationBacklinksSchema), webreportsIntegrationsController.saveBacklinks);
+router.get(
+  '/integrations/:provider/properties',
+  validate(integrationGoogleProviderSchema),
+  webreportsIntegrationsController.listProperties
+);
+router.patch(
+  '/integrations/:provider/property',
+  validate(integrationPropertySchema),
+  webreportsIntegrationsController.setProperty
+);
+
 router.get('/:id/history', webreportsPollLimiter, validate(historyByReportSchema), webreportsController.historyForReport);
 router.get('/:id', webreportsPollLimiter, validate(reportIdSchema), webreportsController.get);
 router.post('/:id/rescan', webreportsCreateLimiter, validate(rescanSchema), webreportsController.rescan);
