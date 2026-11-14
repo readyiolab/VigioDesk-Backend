@@ -507,12 +507,12 @@ async function recoverHomepageFromBrowser(
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     if (signal.aborted) {
       reject(new Error('aborted'));
       return;
     }
-    const timer = setTimeout(resolve, ms);
+    const timer = setTimeout(() => resolve(), ms);
     const onAbort = () => {
       clearTimeout(timer);
       reject(new Error('aborted'));
