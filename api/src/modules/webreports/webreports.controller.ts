@@ -57,6 +57,15 @@ export const webreportsController = {
     }
   },
 
+  async historyForReport(req: Request, res: Response, next: NextFunction) {
+    try {
+      const limit = Number(req.query.limit || 24);
+      res.status(200).json(await webreportsService.historyForReport(req.user.id, req.params.id, limit));
+    } catch (err) {
+      next(err);
+    }
+  },
+
   async get(req: Request, res: Response, next: NextFunction) {
     try {
       res.status(200).json({ report: await webreportsService.get(req.user.id, req.params.id) });

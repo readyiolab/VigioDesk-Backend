@@ -174,6 +174,29 @@ describe('webreport service', () => {
     assert.equal(page.pagination.total, 2);
   });
 
+  it('returns domain history for a report id', async () => {
+    const { api, store } = service();
+    const created = await api.create('user-1', 'FREE', { url: 'https://www.example.com/' });
+    const id = created.report.id as string;
+    const row = store.rows.find((item) => item.id === id);
+    assert.ok(row);
+    row!.status = 'completed';
+    row!.completedAt = new Date('2026-10-12T12:00:00.000Z');
+    row!.seoScore = 70;
+    row!.aiScore = 80;
+    row!.overallScore = 75;
+    const byHost = await api.history('user-1', 'example.com', 24);
+    assert.equal(byHost.host, 'example.com');
+    assert.equal(byHost.points.length, 1);
+    const byId = await api.historyForReport('user-1', id, 24);
+    assert.equal(byId.host, 'example.com');
+    assert.equal(byId.points.length, 1);
+    await assert.rejects(
+      () => api.historyForReport('user-2', id, 24),
+      (err: unknown) => err instanceof AppError && err.statusCode === 404
+    );
+  });
+
   it('shares, revokes, and allowlists the public report', async () => {
     const { api } = service();
     const created = await api.create('user-1', 'FREE', { url: 'https://example.com/' });

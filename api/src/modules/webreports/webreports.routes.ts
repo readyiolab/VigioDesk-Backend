@@ -5,6 +5,7 @@ import { webreportsCreateLimiter, webreportsPollLimiter } from '../../middleware
 import { webreportsController } from './webreports.controller';
 import {
   createWebReportSchema,
+  historyByReportSchema,
   historyWebReportsSchema,
   listWebReportsSchema,
   reportIdSchema,
@@ -22,6 +23,7 @@ router.get('/history', validate(historyWebReportsSchema), webreportsController.h
 router.get('/schedules', webreportsController.listSchedules);
 router.post('/schedules', webreportsCreateLimiter, webreportsController.createSchedule);
 router.delete('/schedules/:scheduleId', webreportsController.deleteSchedule);
+router.get('/:id/history', webreportsPollLimiter, validate(historyByReportSchema), webreportsController.historyForReport);
 router.get('/:id', webreportsPollLimiter, validate(reportIdSchema), webreportsController.get);
 router.post('/:id/rescan', webreportsCreateLimiter, validate(rescanSchema), webreportsController.rescan);
 router.patch('/:id/branding', validate(updateBrandingSchema), webreportsController.updateBranding);

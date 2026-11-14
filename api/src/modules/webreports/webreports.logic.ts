@@ -65,6 +65,39 @@ function toRow(report: StoredReport): ReportRow {
   };
 }
 
+async function buildHistoryPoints(
+  repo: WebReportRepository,
+  userId: string,
+  normalizedHost: string,
+  limit = 24
+) {
+  const capped = Math.min(Math.max(limit, 1), 50);
+  const rows = await repo.listByHost(userId, normalizedHost, capped);
+  const ids = rows.map((r) => r.id);
+  const batchMap = ids.length > 0 ? await repo.loadChildrenBatch(ids) : new Map();
+  const points = rows.map((row) => {
+    const children = batchMap.get(row.id) ?? { checks: [], perf: [] };
+    let errors = 0;
+    let warnings = 0;
+    for (const check of children.checks) {
+      if (check.status !== 'present' || check.severity === 'pass') continue;
+      if (check.severity === 'critical') errors += 1;
+      else if (check.severity === 'warning') warnings += 1;
+    }
+    return {
+      id: row.id,
+      scannedAt: (row.completedAt || row.createdAt).toISOString(),
+      seo: row.seoScore,
+      aiSearch: row.aiScore,
+      overall: row.overallScore,
+      pagesCrawled: row.pagesCrawled || 0,
+      errors,
+      warnings,
+    };
+  });
+  return { host: normalizedHost.replace(/^www\./i, ''), points };
+}
+
 async function present(repo: WebReportRepository, report: StoredReport): Promise<ReportContract> {
   const children = report.status === 'queued' || report.status === 'running'
     ? { checks: [], perf: [] }
@@ -198,31 +231,21 @@ export function createWebReportsService(deps: ServiceDeps) {
       if (!normalizedHost || normalizedHost.length > 253) {
         throw new AppError('Invalid host', 400);
       }
-      const capped = Math.min(Math.max(limit, 1), 50);
-      const rows = await deps.repo.listByHost(userId, normalizedHost, capped);
-      const ids = rows.map((r) => r.id);
-      const batchMap = ids.length > 0 ? await deps.repo.loadChildrenBatch(ids) : new Map();
-      const points = rows.map((row) => {
-        const children = batchMap.get(row.id) ?? { checks: [], perf: [] };
-        let errors = 0;
-        let warnings = 0;
-        for (const check of children.checks) {
-          if (check.status !== 'present' || check.severity === 'pass') continue;
-          if (check.severity === 'critical') errors += 1;
-          else if (check.severity === 'warning') warnings += 1;
+      return buildHistoryPoints(deps.repo, userId, normalizedHost, limit);
+    },
+
+    async historyForReport(userId: string, id: string, limit = 24) {
+      const row = await deps.repo.getById(id);
+      if (!row || row.userId !== userId) throw new AppError('Report not found', 404);
+      const host = (row.normalizedHost || '').replace(/^www\./i, '') || (() => {
+        try {
+          return new URL(row.url).hostname.replace(/^www\./i, '');
+        } catch {
+          return '';
         }
-        return {
-          id: row.id,
-          scannedAt: (row.completedAt || row.createdAt).toISOString(),
-          seo: row.seoScore,
-          aiSearch: row.aiScore,
-          overall: row.overallScore,
-          pagesCrawled: row.pagesCrawled || 0,
-          errors,
-          warnings,
-        };
-      });
-      return { host: normalizedHost, points };
+      })();
+      if (!host) throw new AppError('Invalid host', 400);
+      return buildHistoryPoints(deps.repo, userId, host, limit);
     },
 
     async get(userId: string, id: string) {

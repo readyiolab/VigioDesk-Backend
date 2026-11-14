@@ -121,6 +121,39 @@ export function toReportContract(input: {
   const mobile = input.perf.find((row) => row.device === 'mobile');
   const desktop = input.perf.find((row) => row.device === 'desktop');
   const pending = input.row.status === 'queued' || input.row.status === 'running';
+  const seoNotMeasured =
+    input.row.seoScore === null || seo.some((check) => check.id === 'seo-unavailable');
+  const crawl = detail.crawl || {
+    pagesAttempted: Math.max(input.row.pagesCrawled || 0, seoNotMeasured ? 1 : 0),
+    // Do not treat pagesCrawled as measurable HTML when SEO could not run.
+    htmlPages: seoNotMeasured ? 0 : input.row.pagesCrawled || 0,
+    timedOutPages: 0,
+    sitemapSeeds: 0,
+    seoSource: (seoNotMeasured ? 'unavailable' : 'http') as 'http' | 'browser-fallback' | 'unavailable',
+  };
+  const completeness = parseJson(input.row.completenessJson, {
+    complete: false,
+    unavailableSections: pending ? ['pending'] : [],
+  }) as { complete: boolean; unavailableSections: string[] };
+  if (!pending) {
+    const missing: string[] = [];
+    if (input.row.seoScore === null && !completeness.unavailableSections.some((s) => /^seo$/i.test(s))) {
+      missing.push('seo');
+    }
+    if (input.row.aiScore === null && !completeness.unavailableSections.some((s) => /ai/i.test(s))) {
+      missing.push('ai-search');
+    }
+    if (input.row.mobileScore === null && !completeness.unavailableSections.some((s) => /mobile/i.test(s))) {
+      missing.push('mobile');
+    }
+    if (input.row.desktopScore === null && !completeness.unavailableSections.some((s) => /desktop/i.test(s))) {
+      missing.push('desktop');
+    }
+    if (missing.length) {
+      completeness.unavailableSections = [...completeness.unavailableSections, ...missing];
+      completeness.complete = false;
+    }
+  }
   return {
     contractVersion: input.row.contractVersion || CONTRACT_VERSION,
     id: input.row.id,
@@ -131,17 +164,8 @@ export function toReportContract(input: {
     scannedAt: iso(input.row.completedAt),
     createdAt: iso(input.row.createdAt) || new Date(0).toISOString(),
     pagesCrawled: input.row.pagesCrawled || 0,
-    crawl: detail.crawl || {
-      pagesAttempted: input.row.pagesCrawled || 0,
-      htmlPages: input.row.pagesCrawled || 0,
-      timedOutPages: 0,
-      sitemapSeeds: 0,
-      seoSource: input.row.seoScore === null ? 'unavailable' : 'http',
-    },
-    completeness: parseJson(input.row.completenessJson, {
-      complete: false,
-      unavailableSections: pending ? ['pending'] : [],
-    }),
+    crawl,
+    completeness,
     scores: {
       overall: input.row.overallScore,
       mobile: input.row.mobileScore,
