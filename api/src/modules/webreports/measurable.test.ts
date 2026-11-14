@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { isSameSite } from '../../../../shared/webreports/canonicalize';
+import { isSameSite, reanchorOrigin } from '../../../../shared/webreports/canonicalize';
+import { looksLikeHtml } from '../../../../shared/webreports/htmlDetect';
 import {
   buildCrawlMetrics,
   isMeasurablePage,
@@ -86,6 +87,20 @@ describe('measurable pages', () => {
     assert.equal(isSameSite('https://blog.example.com/', 'https://example.com'), false);
   });
 
+  it('re-anchors crawl origin from apex to www on same-site redirect', () => {
+    assert.equal(reanchorOrigin('https://apple.com', 'https://www.apple.com/'), 'https://www.apple.com');
+    assert.equal(reanchorOrigin('https://www.apple.com', 'https://www.apple.com/'), 'https://www.apple.com');
+    assert.equal(reanchorOrigin('https://apple.com', 'https://store.apple.com/'), 'https://apple.com');
+  });
+
+  it('accepts doctype and large partial HTML bodies', () => {
+    assert.equal(looksLikeHtml('<!DOCTYPE html><html><head></head><body>Hi</body></html>'), true);
+    assert.equal(looksLikeHtml('<html lang="en"><body>Hi</body></html>'), true);
+    assert.equal(looksLikeHtml(''), false);
+    assert.equal(looksLikeHtml('not html'), false);
+    assert.equal(looksLikeHtml(`<div>${'x'.repeat(500)}</div>`), true);
+  });
+
   it('recovers SEO score after browser-style HTML merge replaces a timed-out page', () => {
     const broken = snapshot({}, [page({ isHtml: false, timedOut: true, statusCode: null, schemaTypes: [] })]);
     assert.equal(measurablePages(broken).length, 0);
@@ -99,9 +114,14 @@ describe('measurable pages', () => {
     const seo = runSeoChecks(recovered);
     assert.notEqual(scoreChecks(seo), null);
     assert.equal(runAiChecks(recovered).find((c) => c.id === 'ai-structured-data')?.status, 'absent');
-    const metrics = buildCrawlMetrics(recovered, 'browser-fallback', 8);
+    const metrics = buildCrawlMetrics(recovered, 'browser-fallback', 8, {
+      attempted: true,
+      succeeded: true,
+      error: null,
+    });
     assert.equal(metrics.htmlPages, 1);
     assert.equal(metrics.seoSource, 'browser-fallback');
     assert.equal(metrics.sitemapSeeds, 8);
+    assert.equal(metrics.seoRecovery?.succeeded, true);
   });
 });

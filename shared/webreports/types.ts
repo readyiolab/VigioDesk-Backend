@@ -243,6 +243,11 @@ export interface ReportContract {
     timedOutPages: number;
     sitemapSeeds: number;
     seoSource?: 'http' | 'browser-fallback' | 'unavailable';
+    seoRecovery?: {
+      attempted: boolean;
+      succeeded: boolean;
+      error: string | null;
+    };
   };
   completeness: Completeness;
   scores: ScoreBlock;

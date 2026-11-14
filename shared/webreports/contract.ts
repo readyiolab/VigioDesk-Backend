@@ -45,6 +45,11 @@ export interface CrawlStats {
   timedOutPages: number;
   sitemapSeeds: number;
   seoSource?: 'http' | 'browser-fallback' | 'unavailable';
+  seoRecovery?: {
+    attempted: boolean;
+    succeeded: boolean;
+    error: string | null;
+  };
 }
 
 export interface ReportDetail {

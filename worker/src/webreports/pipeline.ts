@@ -1,12 +1,17 @@
 import { crawlSite, parseSitemapXml, pickKeyPages } from '../../../shared/webreports/crawl';
-import { isSameOrigin, isSameSite, normalizeCrawlUrl } from '../../../shared/webreports/canonicalize';
+import { isSameOrigin, isSameSite, normalizeCrawlUrl, reanchorOrigin } from '../../../shared/webreports/canonicalize';
 import { runSeoChecks } from '../../../shared/webreports/seoChecks';
 import { runAiChecks } from '../../../shared/webreports/aiChecks';
 import { jsRenderRatio } from '../../../shared/webreports/aiChecks';
 import { buildRecommendations } from '../../../shared/webreports/recommendations';
 import { scoreChecks, combineScores } from '../../../shared/webreports/scoring';
 import { weightsFromEnv } from '../../../shared/webreports/scoringConfig';
-import { buildCrawlMetrics, measurablePages, type SeoSource } from '../../../shared/webreports/measurable';
+import {
+  buildCrawlMetrics,
+  measurablePages,
+  type SeoRecoveryDiagnostics,
+  type SeoSource,
+} from '../../../shared/webreports/measurable';
 import { SCORING_VERSION } from '../../../shared/webreports/types';
 import { progressFor } from '../../../shared/webreports/progress';
 import { summaryPayload } from '../../../shared/webreports/summary';
@@ -18,6 +23,7 @@ import { logger } from './runtime';
 import { parseHtml } from './parsePage';
 import { evaluateBotAccess, evaluateSearchBotAccess, isAllowedByRobots, sitemapsFromRobots } from './robotsEval';
 import { startSsrfProxy } from './proxy';
+import { looksLikeHtml } from '../../../shared/webreports/htmlDetect';
 import { fetchRenderedHtml, launchBrowser, renderedTextLength, runDeviceSet } from './browser';
 import { fetchFieldData, mergeField } from './psi';
 import { buildSummary } from './summaryClient';
@@ -66,13 +72,57 @@ export async function runPipeline(reportId: string, generation: number, jobId: s
     proxy = await startSsrfProxy(nodeDnsResolve);
     browser = await launchBrowser(proxy.port, env.CHROME_PATH);
 
+    const recoveryTimeoutMs = Math.min(Math.max(env.WEBREPORTS_PAGE_TIMEOUT_MS, 45_000), 60_000);
     let seoSource: SeoSource = measurablePages(crawl).length ? 'http' : 'unavailable';
+    let seoRecovery: SeoRecoveryDiagnostics = { attempted: false, succeeded: false, error: null };
+    let mobile = checkpoint.mobile || emptyDevice('Mobile lab data is unavailable.');
+    let desktop = checkpoint.desktop || emptyDevice('Desktop lab data is unavailable.');
+    const perfUrls = [crawl.startUrl];
+    let mobileRanEarly = false;
+
     if (seoSource === 'unavailable' && !signal.aborted) {
-      const recovered = await recoverHomepageFromBrowser(browser, crawl, env.WEBREPORTS_PAGE_TIMEOUT_MS);
-      if (recovered) {
-        crawl = recovered;
+      seoRecovery = { attempted: true, succeeded: false, error: null };
+      const first = await recoverHomepageFromBrowser(browser, crawl, recoveryTimeoutMs);
+      if (first.crawl) {
+        crawl = first.crawl;
         seoSource = 'browser-fallback';
+        seoRecovery = { attempted: true, succeeded: true, error: null };
         logger.info({ reportId, jobId }, 'SEO recovered via browser HTML fallback');
+      } else {
+        seoRecovery = {
+          attempted: true,
+          succeeded: false,
+          error: first.error || 'Browser HTML recovery returned no usable HTML',
+        };
+        logger.warn({ reportId, jobId, err: first.error, url: crawl.startUrl }, 'Browser HTML recovery failed; trying after mobile Lighthouse');
+
+        // Second chance: warm Chromium via mobile Lighthouse, then retry HTML capture.
+        if (!checkpoint.mobile) {
+          if (!(await updateStage(reportId, jobId, generation, 'testing_mobile', progressFor('testing_mobile')))) return;
+          if (!signal.aborted) {
+            mobile = await runDeviceSet(browser, perfUrls, 'mobile', env.WEBREPORTS_LIGHTHOUSE_CONCURRENCY, signal);
+            mobileRanEarly = true;
+          }
+          if (!(await updateStage(reportId, jobId, generation, 'testing_mobile', progressFor('testing_mobile'), { crawl, mobile }))) {
+            return;
+          }
+        }
+        if (!signal.aborted && measurablePages(crawl).length === 0) {
+          const second = await recoverHomepageFromBrowser(browser, crawl, recoveryTimeoutMs);
+          if (second.crawl) {
+            crawl = second.crawl;
+            seoSource = 'browser-fallback';
+            seoRecovery = { attempted: true, succeeded: true, error: null };
+            logger.info({ reportId, jobId }, 'SEO recovered via browser HTML fallback after Lighthouse');
+          } else {
+            seoRecovery = {
+              attempted: true,
+              succeeded: false,
+              error: second.error || first.error || 'Browser HTML recovery failed after Lighthouse',
+            };
+            logger.warn({ reportId, jobId, err: second.error, url: crawl.startUrl }, 'Browser HTML recovery failed after Lighthouse');
+          }
+        }
       }
     }
 
@@ -89,10 +139,7 @@ export async function runPipeline(reportId: string, generation: number, jobId: s
     if (!(await updateStage(reportId, jobId, generation, 'analyzing_ai_search', progressFor('analyzing_ai_search')))) return;
     const ai = runAiChecks(crawl);
 
-    let mobile = checkpoint.mobile || emptyDevice('Mobile lab data is unavailable.');
-    let desktop = checkpoint.desktop || emptyDevice('Desktop lab data is unavailable.');
-    const perfUrls = [crawl.startUrl];
-    if (!checkpoint.mobile) {
+    if (!checkpoint.mobile && !mobileRanEarly) {
       if (!(await updateStage(reportId, jobId, generation, 'testing_mobile', progressFor('testing_mobile')))) return;
       if (!signal.aborted) mobile = await runDeviceSet(browser, perfUrls, 'mobile', env.WEBREPORTS_LIGHTHOUSE_CONCURRENCY, signal);
       if (!(await updateStage(reportId, jobId, generation, 'testing_mobile', progressFor('testing_mobile'), { crawl, mobile }))) return;
@@ -150,7 +197,7 @@ export async function runPipeline(reportId: string, generation: number, jobId: s
       jsRatio: ratioPage
         ? jsRenderRatio(ratioPage.rawVisibleTextLength, ratioPage.renderedVisibleTextLength || 1)
         : null,
-      crawl: buildCrawlMetrics(crawl, seoSource),
+      crawl: buildCrawlMetrics(crawl, seoSource, crawl.sitemap.urls.length, seoRecovery.attempted ? seoRecovery : undefined),
     };
 
     if (!(await updateStage(reportId, jobId, generation, 'generating_summary', progressFor('generating_summary')))) return;
@@ -256,9 +303,14 @@ async function collectCrawl(startUrl: string, maxPages: number, signal: AbortSig
     parseHtml,
   });
   const sitemapState = classifySitemap(seeds, pages.pages);
+  const home =
+    pages.pages.find((page) => page.url === startUrl) ||
+    pages.pages.find((page) => page.finalUrl === startUrl) ||
+    pages.pages[0];
+  const anchoredOrigin = home?.finalUrl ? reanchorOrigin(origin, home.finalUrl) : origin;
   return {
     startUrl,
-    origin,
+    origin: anchoredOrigin,
     pages: pages.pages,
     robots: {
       status: robotsStatusNorm,
@@ -471,39 +523,53 @@ async function recoverHomepageFromBrowser(
   browser: Browser,
   crawl: CrawlSnapshot,
   timeoutMs: number
-): Promise<CrawlSnapshot | null> {
-  const rendered = await fetchRenderedHtml(browser, crawl.startUrl, timeoutMs);
-  if (!rendered?.html || !/<html[\s>]/i.test(rendered.html)) return null;
-  const parsed = parseHtml(rendered.html, rendered.finalUrl || crawl.startUrl);
-  const { links, ...fields } = parsed;
-  const internalLinks: string[] = [];
-  const externalLinks: string[] = [];
-  for (const link of links) {
-    const normalized = normalizeCrawlUrl(link, rendered.finalUrl || crawl.startUrl);
-    if (!normalized) continue;
-    if (isSameOrigin(normalized, crawl.origin)) internalLinks.push(normalized);
-    else externalLinks.push(normalized);
+): Promise<{ crawl: CrawlSnapshot | null; error: string | null }> {
+  try {
+    const rendered = await fetchRenderedHtml(browser, crawl.startUrl, timeoutMs);
+    if (!rendered?.html || !looksLikeHtml(rendered.html)) {
+      return { crawl: null, error: 'Browser returned no usable HTML' };
+    }
+    const finalUrl = rendered.finalUrl || crawl.startUrl;
+    const origin = reanchorOrigin(crawl.origin, finalUrl);
+    const parsed = parseHtml(rendered.html, finalUrl);
+    const { links, ...fields } = parsed;
+    const internalLinks: string[] = [];
+    const externalLinks: string[] = [];
+    for (const link of links) {
+      const normalized = normalizeCrawlUrl(link, finalUrl);
+      if (!normalized) continue;
+      if (isSameOrigin(normalized, origin) || isSameSite(normalized, origin)) {
+        internalLinks.push(normalized);
+      } else {
+        externalLinks.push(normalized);
+      }
+    }
+    const page: PageSnapshot = {
+      url: crawl.startUrl,
+      finalUrl,
+      statusCode: 200,
+      contentType: 'text/html',
+      responseMs: null,
+      sizeBytes: rendered.html.length,
+      redirectChain: finalUrl === crawl.startUrl ? [] : [crawl.startUrl],
+      timedOut: false,
+      inconclusive: false,
+      ...fields,
+      isHtml: true,
+      indexable: fields.indexable !== false,
+      internalLinks,
+      externalLinks,
+      renderedVisibleTextLength: fields.rawVisibleTextLength,
+    };
+    const rest = crawl.pages.filter(
+      (item) => item.url !== crawl.startUrl && item.finalUrl !== crawl.startUrl && item.finalUrl !== page.finalUrl
+    );
+    return { crawl: { ...crawl, origin, pages: [page, ...rest] }, error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Browser HTML recovery failed';
+    logger.warn({ err, url: crawl.startUrl }, 'recoverHomepageFromBrowser threw');
+    return { crawl: null, error: message };
   }
-  const page: PageSnapshot = {
-    url: crawl.startUrl,
-    finalUrl: rendered.finalUrl || crawl.startUrl,
-    statusCode: 200,
-    contentType: 'text/html',
-    responseMs: null,
-    sizeBytes: rendered.html.length,
-    redirectChain: [],
-    timedOut: false,
-    inconclusive: false,
-    ...fields,
-    isHtml: true,
-    internalLinks,
-    externalLinks,
-    renderedVisibleTextLength: fields.rawVisibleTextLength,
-  };
-  const rest = crawl.pages.filter(
-    (item) => item.url !== crawl.startUrl && item.finalUrl !== crawl.startUrl && item.finalUrl !== page.finalUrl
-  );
-  return { ...crawl, pages: [page, ...rest] };
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

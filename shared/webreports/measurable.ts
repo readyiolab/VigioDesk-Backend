@@ -2,12 +2,19 @@ import type { CrawlSnapshot, PageSnapshot } from './types';
 
 export type SeoSource = 'http' | 'browser-fallback' | 'unavailable';
 
+export interface SeoRecoveryDiagnostics {
+  attempted: boolean;
+  succeeded: boolean;
+  error: string | null;
+}
+
 export interface CrawlMetrics {
   pagesAttempted: number;
   htmlPages: number;
   timedOutPages: number;
   sitemapSeeds: number;
   seoSource: SeoSource;
+  seoRecovery?: SeoRecoveryDiagnostics;
 }
 
 /** Pages usable for on-page SEO / schema measurement. */
@@ -28,7 +35,8 @@ export function measurablePages(snapshot: CrawlSnapshot): PageSnapshot[] {
 export function buildCrawlMetrics(
   snapshot: CrawlSnapshot,
   seoSource: SeoSource,
-  sitemapSeeds = snapshot.sitemap.urls.length
+  sitemapSeeds = snapshot.sitemap.urls.length,
+  seoRecovery?: SeoRecoveryDiagnostics
 ): CrawlMetrics {
   return {
     pagesAttempted: snapshot.pages.length,
@@ -36,5 +44,6 @@ export function buildCrawlMetrics(
     timedOutPages: snapshot.pages.filter((page) => page.timedOut).length,
     sitemapSeeds,
     seoSource,
+    ...(seoRecovery ? { seoRecovery } : {}),
   };
 }

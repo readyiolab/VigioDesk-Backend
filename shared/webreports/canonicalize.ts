@@ -117,6 +117,17 @@ export function isSameSite(candidate: string, origin: string): boolean {
   }
 }
 
+/** Prefer final www (or apex) origin when the homepage redirected same-site. */
+export function reanchorOrigin(currentOrigin: string, finalUrl: string): string {
+  try {
+    if (!isSameSite(finalUrl, currentOrigin)) return currentOrigin;
+    const next = new URL(finalUrl).origin;
+    return next || currentOrigin;
+  } catch {
+    return currentOrigin;
+  }
+}
+
 export function normalizeCrawlUrl(candidate: string, base?: string): string | null {
   try {
     const absolute = base ? new URL(candidate, base).toString() : candidate;

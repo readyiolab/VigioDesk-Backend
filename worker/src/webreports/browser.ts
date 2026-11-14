@@ -2,9 +2,12 @@ import type { Browser } from 'puppeteer';
 import type { DevicePerformance } from '../../../shared/webreports/types';
 import { averageDevices, metricsFromLighthouse } from '../../../shared/webreports/lighthouseMetrics';
 import { unwrapHostname } from '../../../shared/webreports/canonicalize';
+import { looksLikeHtml } from '../../../shared/webreports/htmlDetect';
 import { isProhibitedAddress } from '../../../shared/webreports/urlSafety';
 import ipaddr from 'ipaddr.js';
 import { logger } from './runtime';
+
+export { looksLikeHtml };
 
 const mobileSettings = {
   extends: 'lighthouse:default',
@@ -121,16 +124,47 @@ export async function renderedTextLength(browser: Browser, url: string, timeoutM
   });
 }
 
-/** Full HTML for SEO fallback when raw HTTP crawl produced no measurable pages. */
+const RECOVERY_CHROME_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
+/**
+ * Full HTML for SEO fallback when raw HTTP crawl produced no measurable pages.
+ * Uses a dedicated loader (no request interception) so heavy sites like apple.com
+ * can succeed the same way Lighthouse does; SSRF is still enforced by the proxy.
+ */
 export async function fetchRenderedHtml(
   browser: Browser,
   url: string,
   timeoutMs: number
 ): Promise<{ html: string; finalUrl: string } | null> {
-  return withSafePage(browser, url, timeoutMs, async (page) => {
-    const html = await page.content();
-    return { html, finalUrl: page.url() || url };
-  });
+  const budget = Math.min(Math.max(timeoutMs, 20_000), 60_000);
+  const attempts: Array<'load' | 'domcontentloaded'> = ['load', 'domcontentloaded'];
+  let lastError: unknown = null;
+
+  for (const waitUntil of attempts) {
+    const page = await browser.newPage();
+    try {
+      await page.setUserAgent(RECOVERY_CHROME_UA);
+      await page.setViewport({ width: 1350, height: 940, deviceScaleFactor: 1 });
+      await page.goto(url, { waitUntil, timeout: budget });
+      const html = await page.content();
+      if (!looksLikeHtml(html)) {
+        lastError = new Error('Rendered body did not look like HTML');
+        continue;
+      }
+      return { html, finalUrl: page.url() || url };
+    } catch (err) {
+      lastError = err;
+      logger.warn({ err, url, waitUntil }, 'Browser HTML recovery navigation failed');
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+  }
+
+  if (lastError) {
+    logger.warn({ err: lastError, url }, 'Browser HTML recovery exhausted retries');
+  }
+  return null;
 }
 
 export async function runLighthouse(
