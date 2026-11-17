@@ -41,6 +41,8 @@ export interface SendResult {
   documentId: string;
   status: string;
   notified: { recipientId: string; email: string; delivered: boolean; error?: string }[];
+  /** True when invitations are still leaving the mailer after the HTTP response. */
+  deliveryPending?: boolean;
 }
 
 export const sendService = {
@@ -207,27 +209,36 @@ export const sendService = {
           )
         : recipients;
 
-    const notified = await deliverInvitations(toNotify, tokens, doc, senderName, expiresAt);
-
-    // Document + tokens are already committed. If every invite bounced, undo the
-    // send so the owner can fix SMTP / the address and try again — otherwise the
-    // UI says "Sent" while nobody can open a link from their inbox.
-    const actionableNotified = notified.filter((n) =>
-      toNotify.some((r: any) => r.id === n.recipientId && ACTIONABLE_ROLES.has(r.role))
-    );
-    if (
-      actionableNotified.length > 0 &&
-      actionableNotified.every((n) => !n.delivered)
-    ) {
-      await revertFailedSend(documentId, userId);
-      const reason = actionableNotified[0]?.error || 'SMTP delivery failed';
-      throw new AppError(
-        `Couldn't deliver the signing invitation email (${reason}). Check your email settings and try again.`,
-        503
-      );
-    }
-
+    // Return as soon as the envelope is SENT. Invitation SMTP runs in the
+    // background so the owner isn't blocked on every recipient mailbox.
     void (async () => {
+      try {
+        const notified = await deliverInvitations(toNotify, tokens, doc, senderName, expiresAt);
+        const actionableNotified = notified.filter((n) =>
+          toNotify.some((r: any) => r.id === n.recipientId && ACTIONABLE_ROLES.has(r.role))
+        );
+        if (
+          actionableNotified.length > 0 &&
+          actionableNotified.every((n) => !n.delivered)
+        ) {
+          await revertFailedSend(documentId, userId);
+          logger.error(
+            { documentId, userId, reason: actionableNotified[0]?.error },
+            'Reverted send after all invitation emails failed (async delivery)'
+          );
+          return;
+        }
+        const failed = notified.filter((n) => !n.delivered);
+        if (failed.length) {
+          logger.warn(
+            { documentId, failed: failed.map((f) => f.email) },
+            'Some signing invitations failed to send'
+          );
+        }
+      } catch (err) {
+        logger.error({ err, documentId }, 'Async invitation delivery crashed');
+      }
+
       try {
         await Promise.all(
           (recipients as any[]).map(async (r) => {
@@ -256,7 +267,7 @@ export const sendService = {
       }
     })();
 
-    return { documentId, status: 'SENT', notified };
+    return { documentId, status: 'SENT', notified: [], deliveryPending: true };
   },
 
   /**

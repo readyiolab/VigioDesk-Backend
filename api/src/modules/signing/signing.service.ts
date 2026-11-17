@@ -860,6 +860,52 @@ export const signingService = {
 
     const actionable = recipients.filter((r: any) => r.role === 'SIGNER' || r.role === 'APPROVER');
     const completed = actionable.filter((r: any) => r.status === 'COMPLETED');
+    const versionRows = versions.map((v: any) => ({
+      ...v,
+      digitallySigned: Boolean(v.digitallySigned),
+      selfSignedCert: Boolean(v.selfSignedCert),
+    }));
+    const latest = versionRows.length
+      ? versionRows.reduce((best: any, row: any) => (row.version > best.version ? row : best), versionRows[0])
+      : null;
+    const hasTsa = Boolean(latest?.tsaTimestamp);
+    const seal =
+      doc.status === 'FINALIZING'
+        ? {
+            state: 'sealing' as const,
+            digitallySigned: false,
+            selfSignedCert: false,
+            tsaTimestamp: false,
+            message: 'Sealing the signed PDF and attaching the certificate of completion.',
+          }
+        : doc.status === 'COMPLETED'
+          ? latest?.digitallySigned
+            ? {
+                state: 'sealed' as const,
+                digitallySigned: true,
+                selfSignedCert: Boolean(latest.selfSignedCert),
+                tsaTimestamp: hasTsa,
+                message: hasTsa
+                  ? 'Completed and cryptographically sealed with a trusted timestamp.'
+                  : latest.selfSignedCert
+                    ? 'Completed and sealed with a self-signed certificate (readers may warn about the issuer).'
+                    : 'Completed and cryptographically sealed.',
+              }
+            : {
+                state: 'completed_unsigned' as const,
+                digitallySigned: false,
+                selfSignedCert: false,
+                tsaTimestamp: false,
+                message:
+                  'Everyone has signed and the PDF is ready, but cryptographic sealing did not complete. Downloads still include the signatures and audit certificate.',
+              }
+          : {
+              state: 'not_applicable' as const,
+              digitallySigned: false,
+              selfSignedCert: false,
+              tsaTimestamp: false,
+              message: null as string | null,
+            };
 
     return {
       id: doc.id,
@@ -879,11 +925,8 @@ export const signingService = {
         fieldsTotal: Number(fieldStats?.total ?? 0),
       },
       recipients: recipients.map(toRecipientDTO),
-      versions: versions.map((v: any) => ({
-        ...v,
-        digitallySigned: Boolean(v.digitallySigned),
-        selfSignedCert: Boolean(v.selfSignedCert),
-      })),
+      versions: versionRows,
+      seal,
     };
   },
 
