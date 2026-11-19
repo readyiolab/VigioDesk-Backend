@@ -39,15 +39,21 @@ export async function signPdf(
 ): Promise<SignedPdfResult> {
   const cert = getSigningCert();
 
-  const pdfDoc = await PDFDocument.load(assembledBytes);
+  const pdfDoc = await PDFDocument.load(assembledBytes, { ignoreEncryption: true });
+  const firstPage = pdfDoc.getPages()[0];
 
+  // Invisible widget on page 1 so readers open on the signed document, not the
+  // certificate pages appended at the end (default placeholder targets last page).
   pdflibAddPlaceholder({
     pdfDoc,
+    pdfPage: firstPage,
     reason: meta.reason,
     contactInfo: meta.contactInfo ?? '',
     name: meta.signerName,
     location: meta.location ?? '',
     signingTime: meta.signingTime,
+    widgetRect: [0, 0, 0, 0],
+    appName: 'PDFProduct',
   });
 
   // useObjectStreams:false is REQUIRED: @signpdf locates the signature by a

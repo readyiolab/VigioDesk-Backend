@@ -211,9 +211,26 @@ export const pdfStampService = {
    * everyone is done, and the viewer overlays them for in-progress documents.
    * The signed artifact is therefore produced exactly once, deterministically,
    * from the untouched original.
+   *
+   * Pages are copied into a fresh document before drawing. In-place
+   * load→mutate→save on Word/LibreOffice PDFs often blanks original content
+   * streams while leaving newly drawn certificate pages intact — which is how
+   * a "signed" download can look certificate-only.
    */
   async stamp(originalBytes: Buffer, fields: StampField[]): Promise<Buffer> {
-    const pdf = await PDFDocument.load(originalBytes);
+    const source = await PDFDocument.load(originalBytes, { ignoreEncryption: true });
+    const originalPageCount = source.getPageCount();
+
+    const pdf = await PDFDocument.create();
+    const copied = await pdf.copyPages(source, source.getPageIndices());
+    for (const page of copied) pdf.addPage(page);
+
+    if (pdf.getPageCount() !== originalPageCount) {
+      throw new Error(
+        `Stamp page copy lost pages: expected ${originalPageCount}, got ${pdf.getPageCount()}`
+      );
+    }
+
     const helvetica = await pdf.embedFont(StandardFonts.Helvetica);
     // Typed signatures render in italic as a stand-in for a script face. The
     // standard 14 PDF fonts include no handwriting font, and embedding one
@@ -245,7 +262,9 @@ export const pdfStampService = {
     }
 
     /**
-     * Flatten any interactive form the original carried.
+     * Flatten any interactive form the original carried — only when fields
+     * exist. Calling flatten() on an empty form still rewrites appearances on
+     * some producers and can blank page content.
      *
      * Without this, an AcroForm text box in the source PDF stays editable after
      * signing: a recipient could alter the terms of a document they had already
@@ -255,14 +274,24 @@ export const pdfStampService = {
      * pins the exact bytes either way.
      */
     try {
-      pdf.getForm().flatten();
+      const form = pdf.getForm();
+      if (form.getFields().length > 0) {
+        form.flatten();
+      }
     } catch {
       // No form, or a form pdf-lib can't flatten. The drawn content above is
       // page content, not annotations, so the signatures themselves are already
       // permanent regardless.
     }
 
-    return Buffer.from(await pdf.save());
+    const out = Buffer.from(await pdf.save({ useObjectStreams: false }));
+    const verify = await PDFDocument.load(out, { ignoreEncryption: true });
+    if (verify.getPageCount() !== originalPageCount) {
+      throw new Error(
+        `Stamp save lost pages: expected ${originalPageCount}, got ${verify.getPageCount()}`
+      );
+    }
+    return out;
   },
 };
 

@@ -4,11 +4,36 @@ import { AppError } from '../../middleware/errorHandler.middleware';
 
 const PAGE_W = 595.28; // A4 portrait, points
 const PAGE_H = 841.89;
-const MARGIN = 50;
+const MARGIN = 48;
 const BRAND = rgb(0.145, 0.388, 0.922); // #2563eb
 const INK = rgb(0.06, 0.09, 0.16);
 const MUTED = rgb(0.42, 0.45, 0.5);
 const RULE = rgb(0.89, 0.91, 0.94);
+const FILL = rgb(0.965, 0.973, 0.984); // slate-50
+const OK = rgb(0.02, 0.59, 0.41); // emerald-600
+const BAD = rgb(0.86, 0.15, 0.15);
+const LABEL_W = 110;
+
+const ACTION_LABEL: Record<string, string> = {
+  DOCUMENT_UPLOADED: 'Document uploaded',
+  DOCUMENT_CONVERTED: 'Converted to PDF',
+  DOCUMENT_UPDATED: 'Document updated',
+  FIELDS_UPDATED: 'Fields updated',
+  RECIPIENT_ADDED: 'Recipient added',
+  DOCUMENT_SENT: 'Sent for signature',
+  DOCUMENT_OPENED: 'Opened',
+  DOCUMENT_VIEWED: 'Opened',
+  RECIPIENT_VIEWED: 'Opened',
+  FIELD_COMPLETED: 'Field completed',
+  DOCUMENT_SIGNED: 'Signed',
+  RECIPIENT_SIGNED: 'Signed',
+  RECIPIENT_COMPLETED: 'Signed',
+  DOCUMENT_COMPLETED: 'All parties signed',
+  DOCUMENT_DECLINED: 'Declined',
+  RECIPIENT_DECLINED: 'Declined',
+  REMINDER_SENT: 'Reminder sent',
+  DOCUMENT_VOIDED: 'Cancelled',
+};
 
 interface Fonts {
   regular: PDFFont;
@@ -93,6 +118,67 @@ class Layout {
     this.y -= points;
   }
 
+  /** Two-column label / value row used in the document summary table. */
+  kv(label: string, value: string, opts: { mono?: boolean } = {}): void {
+    const size = 9;
+    const valueFont = opts.mono ? this.fonts.mono : this.fonts.regular;
+    const valueWidth = PAGE_W - MARGIN * 2 - LABEL_W;
+    const lines = wrap(value || '—', valueFont, size, valueWidth);
+    this.ensure(size * lines.length + 8);
+    this.y -= size;
+    this.page.drawText(label, {
+      x: MARGIN,
+      y: this.y,
+      size,
+      font: this.fonts.regular,
+      color: MUTED,
+    });
+    let valueY = this.y;
+    lines.forEach((line, i) => {
+      if (i > 0) valueY -= size + 2;
+      this.page.drawText(line, {
+        x: MARGIN + LABEL_W,
+        y: valueY,
+        size,
+        font: valueFont,
+        color: INK,
+      });
+    });
+    this.y = valueY - 6;
+  }
+
+  /** Soft bordered box for the integrity hash. */
+  hashBox(hash: string): void {
+    const size = 8;
+    const pad = 10;
+    const innerW = PAGE_W - MARGIN * 2 - pad * 2;
+    const lines = wrap(hash, this.fonts.mono, size, innerW);
+    const boxH = pad * 2 + lines.length * (size + 3);
+    this.ensure(boxH + 8);
+    this.y -= boxH;
+    this.page.drawRectangle({
+      x: MARGIN,
+      y: this.y,
+      width: PAGE_W - MARGIN * 2,
+      height: boxH,
+      color: FILL,
+      borderColor: RULE,
+      borderWidth: 0.75,
+    });
+    let ty = this.y + boxH - pad - size;
+    for (const line of lines) {
+      this.page.drawText(line, {
+        x: MARGIN + pad,
+        y: ty,
+        size,
+        font: this.fonts.mono,
+        color: BRAND,
+      });
+      ty -= size + 3;
+    }
+    this.y -= 10;
+  }
+
   getPages(): PDFPage[] {
     return this.pages;
   }
@@ -138,6 +224,16 @@ function fmt(value: Date | string | null): string {
   return `${d.toISOString().replace('T', ' ').slice(0, 19)} UTC`;
 }
 
+function softAction(action: string): string {
+  return ACTION_LABEL[action] ?? action.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
+}
+
+function statusLabel(status: string): { text: string; color: typeof OK } {
+  if (status === 'COMPLETED') return { text: 'Signed', color: OK };
+  if (status === 'DECLINED') return { text: 'Declined', color: BAD };
+  return { text: status, color: MUTED };
+}
+
 export const certificateService = {
   /**
    * Builds the certificate of completion.
@@ -180,101 +276,187 @@ export const certificateService = {
     const L = new Layout(pdf, fonts);
     const contentWidth = PAGE_W - MARGIN * 2;
 
-    // ── Header ──
-    L.text('PDFPRODUCT', { size: 8, font: fonts.bold, color: BRAND, gap: 6 });
-    L.text('Certificate of Completion', { size: 20, font: fonts.bold, gap: 8 });
-    L.paragraph(
-      `This certificate records the electronic signature process for the document below, including who signed, when, and from where.`,
-      { size: 9, color: MUTED, gap: 2 }
-    );
-    L.rule(16);
+    // ── Letterhead ──
+    L.ensure(36);
+    L.space(2);
+    const markY = L.y - 16;
+    L.page.drawRectangle({
+      x: MARGIN,
+      y: markY,
+      width: 16,
+      height: 16,
+      color: BRAND,
+    });
+    L.page.drawText('P', {
+      x: MARGIN + 4.5,
+      y: markY + 4,
+      size: 11,
+      font: fonts.bold,
+      color: rgb(1, 1, 1),
+    });
+    L.page.drawText('PDFProduct', {
+      x: MARGIN + 22,
+      y: markY + 4,
+      size: 11,
+      font: fonts.bold,
+      color: INK,
+    });
+    L.y = markY - 14;
+    L.text('Certificate of Completion', { size: 18, font: fonts.bold, gap: 6 });
+    L.paragraph('Who signed this document, when they signed, and how the file was protected.', {
+      size: 9,
+      color: MUTED,
+      gap: 4,
+    });
+    L.ensure(10);
+    L.y -= 4;
+    L.page.drawLine({
+      start: { x: MARGIN, y: L.y },
+      end: { x: PAGE_W - MARGIN, y: L.y },
+      thickness: 2,
+      color: BRAND,
+    });
+    L.y -= 14;
 
-    // ── Document ──
-    L.text('DOCUMENT', { size: 8, font: fonts.bold, color: MUTED, gap: 8 });
-    for (const line of wrap(doc.title, fonts.bold, 12, contentWidth)) {
-      L.text(line, { size: 12, font: fonts.bold, gap: 3 });
+    // ── Document summary ──
+    L.text('DOCUMENT', { size: 8, font: fonts.bold, color: BRAND, gap: 10 });
+    for (const line of wrap(String(doc.title || 'Untitled'), fonts.bold, 13, contentWidth)) {
+      L.text(line, { size: 13, font: fonts.bold, gap: 3 });
     }
-    L.space(4);
-    L.text(`File name        ${doc.fileName}`, { size: 9, gap: 3 });
-    L.text(`Document ID      ${doc.id}`, { size: 9, font: fonts.mono, gap: 3 });
-    L.text(`Pages            ${doc.pageCount || '—'}`, { size: 9, gap: 3 });
-    L.text(`Sender           ${owner.name ?? '—'} <${owner.email ?? '—'}>`, { size: 9, gap: 3 });
-    L.text(`Signing order    ${doc.flowType === 'SEQUENTIAL' ? 'Sequential (one after another)' : 'Parallel (any order)'}`, { size: 9, gap: 3 });
-    L.text(`Created          ${fmt(doc.createdAt)}`, { size: 9, gap: 3 });
-    L.text(`Sent             ${fmt(doc.sentAt)}`, { size: 9, gap: 3 });
-    L.text(`Completed        ${fmt(doc.completedAt)}`, { size: 9, gap: 3 });
+    L.space(8);
+    L.kv('File name', String(doc.fileName || '—'));
+    L.kv('Document ID', String(doc.id), { mono: true });
+    L.kv('Pages', String(doc.pageCount || '—'));
+    L.kv('Sender', `${owner.name ?? '—'} <${owner.email ?? '—'}>`);
+    L.kv(
+      'Signing order',
+      doc.flowType === 'SEQUENTIAL' ? 'Sequential (one after another)' : 'Parallel (any order)'
+    );
+    L.kv('Created', fmt(doc.createdAt));
+    L.kv('Sent', fmt(doc.sentAt));
+    L.kv('Completed', fmt(doc.completedAt));
     L.rule(14);
 
     // ── Integrity ──
-    L.text('DOCUMENT INTEGRITY', { size: 8, font: fonts.bold, color: MUTED, gap: 8 });
+    L.text('DOCUMENT INTEGRITY', { size: 8, font: fonts.bold, color: BRAND, gap: 8 });
     L.paragraph(
-      'The SHA-256 fingerprint below was computed from the original document when it was uploaded, before any signature was applied. It proves the document presented to the signers is the one recorded here.',
-      { size: 8, color: MUTED, gap: 2 }
+      'Fingerprint of the original file before anyone signed. It proves signers saw this exact document.',
+      { size: 8, color: MUTED, gap: 4 }
     );
-    L.space(6);
-    L.text('Original document SHA-256', { size: 8, font: fonts.bold, gap: 4 });
-    for (const line of wrap(doc.originalHash ?? 'not recorded', fonts.mono, 8, contentWidth)) {
-      L.text(line, { size: 8, font: fonts.mono, color: BRAND, gap: 2 });
-    }
-    L.space(6);
+    L.text('Original SHA-256', { size: 8, font: fonts.bold, gap: 6 });
+    L.hashBox(String(doc.originalHash ?? 'not recorded'));
     L.paragraph(
-      'The completed document carries its own SHA-256, recorded against version ' +
-        `${doc.currentVersion} at the time of sealing and available from the document's status record. It is not printed here because this certificate forms part of that file — a fingerprint cannot include itself.`,
-      { size: 8, color: MUTED, gap: 8 }
-    );
-    L.text('Digital signature', { size: 8, font: fonts.bold, gap: 4 });
-    L.paragraph(
-      'After this certificate was attached, the whole document was sealed with a PKCS#7 digital signature. Any change to a single byte afterwards will cause a PDF reader to report the signature as invalid. The signing time was additionally submitted to an independent RFC 3161 timestamp authority, whose token is retained as third-party proof of when the document existed.',
-      { size: 8, color: MUTED, gap: 2 }
+      'The finished PDF is also digitally sealed. Any later change will show as invalid in a PDF reader.',
+      { size: 8, color: MUTED, gap: 4 }
     );
     L.rule(14);
 
     // ── Signers ──
-    L.text('SIGNERS', { size: 8, font: fonts.bold, color: MUTED, gap: 8 });
+    L.text('SIGNERS', { size: 8, font: fonts.bold, color: BRAND, gap: 10 });
 
     for (const r of recipients) {
-      // Keep a signer's block together rather than splitting their name from
-      // their evidence across a page break.
       L.ensure(78);
-      L.text(`${r.name}  <${r.email}>`, { size: 10, font: fonts.bold, gap: 3 });
-      L.text(
-        `Role ${r.role}${r.signingOrder ? `  ·  Order ${r.signingOrder}` : ''}  ·  Status ${r.status}`,
-        { size: 8, color: MUTED, gap: 4 }
-      );
-      L.text(`Viewed        ${fmt(r.viewedAt)}`, { size: 8, gap: 2 });
-      L.text(`Signed        ${fmt(r.completedAt)}`, { size: 8, gap: 2 });
-      L.text(`IP address    ${r.ipAddress ?? '—'}`, { size: 8, gap: 2 });
-      L.text(`Device        ${r.deviceInfo ?? '—'}`, { size: 8, gap: 2 });
-      L.text(
-        `Verification  ${
-          r.authMethod === 'NONE'
-            ? 'Email link only'
-            : r.otpVerifiedAt
-              ? `${r.authMethod === 'EMAIL_OTP' ? 'Email' : 'SMS'} one-time code, passed ${fmt(r.otpVerifiedAt)}`
-              : `${r.authMethod} (not completed)`
-        }`,
-        { size: 8, gap: 2 }
-      );
+      const cardTop = L.y;
+      const deviceLine = [r.ipAddress, r.deviceInfo].filter(Boolean).join(' · ');
+      const cardH = deviceLine ? 70 : 58;
+      L.y -= cardH;
+      L.page.drawRectangle({
+        x: MARGIN,
+        y: L.y,
+        width: PAGE_W - MARGIN * 2,
+        height: cardH,
+        color: FILL,
+        borderColor: RULE,
+        borderWidth: 0.75,
+      });
+      L.page.drawRectangle({
+        x: MARGIN,
+        y: L.y,
+        width: 3,
+        height: cardH,
+        color: BRAND,
+      });
+
+      const status = statusLabel(String(r.status));
+      const name = String(r.name || 'Signer');
+      const email = String(r.email || '');
+      L.page.drawText(name, {
+        x: MARGIN + 12,
+        y: cardTop - 16,
+        size: 10,
+        font: fonts.bold,
+        color: INK,
+      });
+      const statusW = fonts.bold.widthOfTextAtSize(status.text, 8);
+      L.page.drawText(status.text, {
+        x: PAGE_W - MARGIN - 12 - statusW,
+        y: cardTop - 16,
+        size: 8,
+        font: fonts.bold,
+        color: status.color,
+      });
+      L.page.drawText(email, {
+        x: MARGIN + 12,
+        y: cardTop - 30,
+        size: 8,
+        font: fonts.regular,
+        color: MUTED,
+      });
+
+      const roleBit = `Role ${r.role}${r.signingOrder ? ` · Order ${r.signingOrder}` : ''}`;
+      const when =
+        r.status === 'DECLINED'
+          ? `Declined ${fmt(r.completedAt)}`
+          : `Signed ${fmt(r.completedAt)} · Viewed ${fmt(r.viewedAt)}`;
+      L.page.drawText(roleBit, {
+        x: MARGIN + 12,
+        y: cardTop - 44,
+        size: 7,
+        font: fonts.regular,
+        color: MUTED,
+      });
+      L.page.drawText(when, {
+        x: MARGIN + 12,
+        y: cardTop - 56,
+        size: 7,
+        font: fonts.regular,
+        color: MUTED,
+      });
+      if (deviceLine) {
+        L.page.drawText(deviceLine, {
+          x: MARGIN + 12,
+          y: cardTop - 66,
+          size: 7,
+          font: fonts.regular,
+          color: MUTED,
+        });
+      }
+
+      L.y -= 8;
       if (r.declineReason) {
-        for (const line of wrap(`Declined: ${r.declineReason}`, fonts.regular, 8, contentWidth)) {
-          L.text(line, { size: 8, color: rgb(0.86, 0.15, 0.15), gap: 2 });
+        for (const line of wrap(`Reason: ${r.declineReason}`, fonts.regular, 8, contentWidth - 12)) {
+          L.text(line, { size: 8, color: BAD, x: MARGIN + 12, gap: 2 });
         }
       }
-      L.space(8);
+      L.space(4);
     }
 
     L.rule(14);
 
     // ── Audit trail ──
-    L.text('AUDIT TRAIL', { size: 8, font: fonts.bold, color: MUTED, gap: 4 });
-    L.text(`${audit.length} event(s), in order.`, { size: 8, color: MUTED, gap: 8 });
+    L.text('ACTIVITY', { size: 8, font: fonts.bold, color: BRAND, gap: 4 });
+    L.text(`${audit.length} event${audit.length === 1 ? '' : 's'}, in order.`, {
+      size: 8,
+      color: MUTED,
+      gap: 10,
+    });
 
     for (const entry of audit) {
-      L.ensure(22);
+      L.ensure(28);
       L.text(fmt(entry.createdAt), { size: 7, font: fonts.mono, color: MUTED, gap: 2 });
-      const who = entry.actorName ? `${entry.actorName}` : 'System';
+      const who = entry.actorName ? String(entry.actorName) : 'System';
       const where = [entry.ipAddress, entry.browser, entry.os].filter(Boolean).join(' · ');
-      const line = `${entry.action.replace(/_/g, ' ')} — ${who}${entry.detail ? `: ${entry.detail}` : ''}`;
+      const line = `${softAction(String(entry.action))} — ${who}${entry.detail ? `: ${entry.detail}` : ''}`;
       for (const l of wrap(line, fonts.regular, 8, contentWidth)) {
         L.text(l, { size: 8, gap: 2 });
       }
@@ -286,14 +468,14 @@ export const certificateService = {
     const pages = L.getPages();
     pages.forEach((page, i) => {
       page.drawLine({
-        start: { x: MARGIN, y: MARGIN - 12 },
-        end: { x: PAGE_W - MARGIN, y: MARGIN - 12 },
+        start: { x: MARGIN, y: MARGIN - 10 },
+        end: { x: PAGE_W - MARGIN, y: MARGIN - 10 },
         thickness: 0.75,
         color: RULE,
       });
-      page.drawText(`Certificate of Completion · Document ${doc.id}`, {
+      page.drawText(`PDFProduct · Certificate of Completion · ${doc.id}`, {
         x: MARGIN,
-        y: MARGIN - 24,
+        y: MARGIN - 22,
         size: 7,
         font: fonts.regular,
         color: MUTED,
@@ -301,30 +483,41 @@ export const certificateService = {
       const label = `Page ${i + 1} of ${pages.length}`;
       page.drawText(label, {
         x: PAGE_W - MARGIN - fonts.regular.widthOfTextAtSize(label, 7),
-        y: MARGIN - 24,
+        y: MARGIN - 22,
         size: 7,
         font: fonts.regular,
         color: MUTED,
       });
     });
 
-    return Buffer.from(await pdf.save());
+    return Buffer.from(await pdf.save({ useObjectStreams: false }));
   },
 
   /**
    * Appends the certificate's pages onto the signed document.
    *
-   * Done by copying pages between documents rather than concatenating bytes —
-   * PDFs are object graphs with a cross-reference table, so gluing two files
-   * together produces a corrupt document that most readers will refuse.
+   * Builds a fresh document and copies pages from both sources — mutating the
+   * stamped PDF in place (load→addPage→save) can blank Word-converted content
+   * streams the same way in-place stamping does. Page-count is asserted so a
+   * silent loss of document pages cannot ship as a "certificate-only" file.
    */
   async appendTo(signedBytes: Buffer, certificateBytes: Buffer): Promise<Buffer> {
-    const signed = await PDFDocument.load(signedBytes);
-    const certificate = await PDFDocument.load(certificateBytes);
+    const stamped = await PDFDocument.load(signedBytes, { ignoreEncryption: true });
+    const certificate = await PDFDocument.load(certificateBytes, { ignoreEncryption: true });
+    const expected = stamped.getPageCount() + certificate.getPageCount();
 
-    const copied = await signed.copyPages(certificate, certificate.getPageIndices());
-    for (const page of copied) signed.addPage(page);
+    const out = await PDFDocument.create();
+    const stampedPages = await out.copyPages(stamped, stamped.getPageIndices());
+    for (const page of stampedPages) out.addPage(page);
+    const certPages = await out.copyPages(certificate, certificate.getPageIndices());
+    for (const page of certPages) out.addPage(page);
 
-    return Buffer.from(await signed.save());
+    if (out.getPageCount() !== expected) {
+      throw new Error(
+        `Certificate append lost pages: expected ${expected}, got ${out.getPageCount()}`
+      );
+    }
+
+    return Buffer.from(await out.save({ useObjectStreams: false }));
   },
 };

@@ -876,7 +876,7 @@ export const signingService = {
             digitallySigned: false,
             selfSignedCert: false,
             tsaTimestamp: false,
-            message: 'Sealing the signed PDF and attaching the certificate of completion.',
+            message: 'Preparing your signed PDF. This usually takes a few seconds.',
           }
         : doc.status === 'COMPLETED'
           ? latest?.digitallySigned
@@ -886,10 +886,10 @@ export const signingService = {
                 selfSignedCert: Boolean(latest.selfSignedCert),
                 tsaTimestamp: hasTsa,
                 message: hasTsa
-                  ? 'Completed and cryptographically sealed with a trusted timestamp.'
+                  ? 'Your signed PDF is ready and protected with a trusted timestamp.'
                   : latest.selfSignedCert
-                    ? 'Completed and sealed with a self-signed certificate (readers may warn about the issuer).'
-                    : 'Completed and cryptographically sealed.',
+                    ? 'Your signed PDF is ready. Some readers may show a trust warning until a company certificate is installed.'
+                    : 'Your signed PDF is ready and protected against changes.',
               }
             : {
                 state: 'completed_unsigned' as const,
@@ -897,7 +897,7 @@ export const signingService = {
                 selfSignedCert: false,
                 tsaTimestamp: false,
                 message:
-                  'Everyone has signed and the PDF is ready, but cryptographic sealing did not complete. Downloads still include the signatures and audit certificate.',
+                  'Everyone has signed and the PDF is ready to download. Extra sealing did not finish, but signatures and the certificate are still included.',
               }
           : {
               state: 'not_applicable' as const,

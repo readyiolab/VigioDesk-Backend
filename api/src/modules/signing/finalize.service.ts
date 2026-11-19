@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { PDFDocument } from 'pdf-lib';
 import { getObjectBytes, getSignedDownloadUrl, putObjectBytes } from '../../lib/s3';
 import { db } from '../../lib/mysql';
 import { env } from '../../config/env';
@@ -83,6 +84,12 @@ export const finalizeService = {
       const certificateBytes = await certificateService.build(documentId);
       const assembledBytes = await certificateService.appendTo(stampedBytes, certificateBytes);
 
+      // Support breadcrumb: sealed page count must be document pages + cert pages.
+      const sealedPageCount = (
+        await PDFDocument.load(assembledBytes, { ignoreEncryption: true })
+      ).getPageCount();
+      const originalPageCount = Number(doc!.pageCount) || 0;
+
       let signedBytes = assembledBytes;
       let digitallySigned = false;
       let selfSignedCert = false;
@@ -155,6 +162,8 @@ export const finalizeService = {
           digitallySigned,
           selfSignedCert,
           tsaTimestamp,
+          pageCount: sealedPageCount,
+          originalPageCount,
         },
       });
 
