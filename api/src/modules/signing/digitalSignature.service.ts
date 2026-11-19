@@ -26,8 +26,8 @@ export interface SignedPdfResult {
  *
  * Must be the LAST thing done to the file. The signature seals whatever bytes
  * exist at signing time — stamping a field or appending a page afterwards would
- * invalidate it. So the caller assembles everything (stamped content +
- * certificate page) first, then signs.
+ * invalidate it. The certificate of completion is stored as a separate download,
+ * so this seals the stamped document pages only.
  *
  * `signingTime` is the authoritative completion time from our records, embedded
  * in the signature. The optional TSA timestamp adds an INDEPENDENT attestation

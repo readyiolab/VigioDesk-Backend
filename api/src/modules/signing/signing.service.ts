@@ -4,10 +4,12 @@ import {
   getSignedDownloadUrl,
   getSignedViewUrl,
   hashObject,
+  putObjectBytes,
   readObjectHeadWithSize,
   deleteObject,
   deleteObjects,
 } from '../../lib/s3';
+import { certificateService } from './certificate.service';
 import { db } from '../../lib/mysql';
 import { env } from '../../config/env';
 import { AppError } from '../../middleware/errorHandler.middleware';
@@ -964,17 +966,43 @@ export const signingService = {
     }
 
     const row = await db.query(
-      `SELECT certificateKey FROM tbl_sign_document_version
-        WHERE documentId = ? AND certificateKey IS NOT NULL
+      `SELECT id, certificateKey, version FROM tbl_sign_document_version
+        WHERE documentId = ?
         ORDER BY version DESC LIMIT 1`,
       [documentId]
     );
-    if (!row?.certificateKey) {
+    if (!row) {
       throw new AppError('No certificate has been generated for this document.', 404);
     }
 
+    // Rebuild with the current letterhead so older seals pick up design updates
+    // without re-signing the document PDF.
+    const certificateBytes = await certificateService.build(documentId);
+    const folder = String(doc.fileKey || '')
+      .replace(/\/original_.*$/, '')
+      .replace(/\/converted_.*$/, '');
+    const certificateKey =
+      row.certificateKey ||
+      `${folder || `signing/doc-${documentId}`}/certificate_v${row.version ?? doc.currentVersion ?? 1}.pdf`;
+
+    await putObjectBytes(
+      certificateKey,
+      certificateBytes,
+      'application/pdf',
+      doc.storageBindingId ?? null
+    );
+
+    if (!row.certificateKey) {
+      await db.execute(`UPDATE tbl_sign_document_version SET certificateKey = ? WHERE id = ?`, [
+        certificateKey,
+        row.id,
+      ]);
+    }
+
     const name = `${doc.title.replace(/[^a-zA-Z0-9 _-]/g, '')} (certificate).pdf`;
-    return { url: await getSignedDownloadUrl(row.certificateKey, name, undefined, doc.storageBindingId ?? null) };
+    return {
+      url: await getSignedDownloadUrl(certificateKey, name, undefined, doc.storageBindingId ?? null),
+    };
   },
 
   /** Signed download URL for the original Word (.docx) upload, when present. */

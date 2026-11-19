@@ -248,17 +248,17 @@ export function completionEmail(params: {
 
   const html = layout({
     heading: 'Everyone has signed ✓',
-    preheader: `"${documentTitle}" is fully signed — download the completed document and certificate.`,
+    preheader: `"${documentTitle}" is fully signed — download your signed PDF.`,
     bodyHtml: `
       ${paragraph(`Hi ${escapeHtml(name)},`)}
       ${paragraph(
         `<strong style="color:${INK};">${escapeHtml(
           documentTitle
-        )}</strong> has been signed by everyone. The completed document and its audit certificate are ready to download.`
+        )}</strong> has been signed by everyone. Your signed PDF is ready to download. A separate Certificate of Completion is available from the document status page.`
       )}
       ${button(downloadUrl, 'Download signed document')}
       <p style="margin:14px 0 0;font-size:13px;line-height:1.65;color:${MUTED};">
-        The download includes a Certificate of Completion recording who signed, when, and from where.
+        The signed PDF contains only the signed document pages. Open the document in your account to download the Certificate of Completion.
       </p>
     `,
   });
@@ -268,8 +268,10 @@ export function completionEmail(params: {
     '',
     `"${documentTitle}" has been signed by everyone.`,
     '',
-    `Download the completed document and certificate:`,
+    `Download the signed document:`,
     downloadUrl,
+    '',
+    `A separate Certificate of Completion is available from the document status page.`,
   ].join('\n');
 
   return { subject: `Completed: ${documentTitle}`, html, text };

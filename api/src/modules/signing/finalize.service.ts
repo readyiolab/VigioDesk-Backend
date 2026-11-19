@@ -81,22 +81,21 @@ export const finalizeService = {
       const signedKey = `${folder}/signed_v${version}.pdf`;
       const certificateKey = `${folder}/certificate_v${version}.pdf`;
 
+      // Certificate stays a separate download — do not append it into the signed PDF.
       const certificateBytes = await certificateService.build(documentId);
-      const assembledBytes = await certificateService.appendTo(stampedBytes, certificateBytes);
 
-      // Support breadcrumb: sealed page count must be document pages + cert pages.
       const sealedPageCount = (
-        await PDFDocument.load(assembledBytes, { ignoreEncryption: true })
+        await PDFDocument.load(stampedBytes, { ignoreEncryption: true })
       ).getPageCount();
       const originalPageCount = Number(doc!.pageCount) || 0;
 
-      let signedBytes = assembledBytes;
+      let signedBytes = stampedBytes;
       let digitallySigned = false;
       let selfSignedCert = false;
       let tsaTimestamp: Date | null = null;
       let tsaTokenKey: string | null = null;
       try {
-        const result = await signPdf(assembledBytes, {
+        const result = await signPdf(stampedBytes, {
           signerName: 'PDFToolkit',
           reason: `Signed by all parties of "${doc!.title}"`,
           location: 'PDFToolkit e-Sign',
