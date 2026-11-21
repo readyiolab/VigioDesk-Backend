@@ -7,6 +7,7 @@ import {
   addRecipientSchema,
   auditQuerySchema,
   createDocumentSchema,
+  bulkTemplateSchema,
   createTemplateSchema,
   documentIdSchema,
   documentVersionSchema,
@@ -37,6 +38,7 @@ router.get('/templates', signingController.listTemplates);
 router.post('/templates', validate(createTemplateSchema), signingController.createTemplate);
 router.delete('/templates/:id', validate(templateIdSchema), signingController.deleteTemplate);
 router.post('/templates/:id/use', validate(useTemplateSchema), signingController.useTemplate);
+router.post('/templates/:id/bulk', validate(bulkTemplateSchema), signingController.bulkTemplate);
 
 // NOTE: /stats is declared before /:id so Express doesn't match "stats" as a
 // document id (the uuid validator would then reject it with a confusing 400).
@@ -54,6 +56,7 @@ router.delete('/:id/recipients/:recipientId', validate(recipientIdSchema), signi
 // --- Fields ---
 // Bulk replace, hit repeatedly by the designer's autosave — hence its own limiter.
 router.put('/:id/fields', designerRateLimiter, validate(saveFieldsSchema), signingController.saveFields);
+router.post('/:id/detect-fields', validate(documentIdSchema), signingController.detectFields);
 
 // --- Sending ---
 router.post('/:id/send', validate(documentIdSchema), signingController.send);

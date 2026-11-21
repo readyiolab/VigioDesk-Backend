@@ -213,6 +213,11 @@ const envSchema = z.object({
   // DataForSEO platform credentials for Web Reports backlink metrics (optional).
   DATAFORSEO_LOGIN: z.string().optional(),
   DATAFORSEO_PASSWORD: z.string().optional(),
+
+  // Twilio SMS for eSign SMS_OTP (optional — email OTP remains the default).
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_FROM_NUMBER: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

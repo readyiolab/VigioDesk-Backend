@@ -12,6 +12,7 @@ import { auditService } from './audit.service';
 import { completionEmail } from './email.templates';
 import { SIGNING_LIMITS } from '../../../../shared/signing';
 import { recordCustomerEvent, upsertContact } from '../../lib/customerTracking';
+import { loadSignBranding } from './signBranding';
 
 export const finalizeService = {
   /**
@@ -269,6 +270,7 @@ async function notifyCompletion(doc: any, signedKey: string): Promise<void> {
     downloadName,
     SIGNING_LIMITS.completionDownloadTtlSeconds
   );
+  const brand = await loadSignBranding(doc.ownerId);
 
   const parties = new Map<string, string>();
   if (owner?.email) {
@@ -283,7 +285,7 @@ async function notifyCompletion(doc: any, signedKey: string): Promise<void> {
   await Promise.all(
     [...parties.entries()].map(async ([email, name]) => {
       try {
-        const mail = completionEmail({ name, documentTitle: doc.title, downloadUrl });
+        const mail = completionEmail({ name, documentTitle: doc.title, downloadUrl, brand });
         await sendMail({ ...mail, to: email });
         logger.info({ documentId: doc.id, email }, 'Completion email sent');
       } catch (err) {

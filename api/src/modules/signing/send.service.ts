@@ -5,6 +5,8 @@ import { AppError } from '../../middleware/errorHandler.middleware';
 import { generateSigningToken } from '../../lib/signingSession';
 import { isMailerConfigured, sendMail } from '../../lib/mailer';
 import { invitationEmail } from './email.templates';
+import { loadSignBranding } from './signBranding';
+import { isSmsConfigured } from './sms.service';
 import { SIGNING_LIMITS } from '../../../../shared/signing';
 import { PLAN_LIMITS } from '../../../../shared/constants';
 import { recordCustomerEvent, upsertContact } from '../../lib/customerTracking';
@@ -118,12 +120,19 @@ export const sendService = {
       );
     }
 
-    // SMS_OTP is accepted at the recipient level but can't be delivered yet.
-    // Better to refuse the send than to email a link the signer can never open.
-    const undeliverable = recipients.filter((r: any) => r.authMethod === 'SMS_OTP');
-    if (undeliverable.length > 0) {
+    const smsRecipients = recipients.filter((r: any) => r.authMethod === 'SMS_OTP');
+    if (smsRecipients.length > 0 && !isSmsConfigured()) {
       throw new AppError(
-        `SMS verification isn't available yet. Switch ${undeliverable.map((r: any) => r.name).join(', ')} to email verification or no verification.`,
+        `SMS verification isn't configured on this server. Switch ${smsRecipients
+          .map((r: any) => r.name)
+          .join(', ')} to email verification or ask an admin to set Twilio credentials.`,
+        400
+      );
+    }
+    const smsMissingPhone = smsRecipients.filter((r: any) => !String(r.phone || '').trim());
+    if (smsMissingPhone.length > 0) {
+      throw new AppError(
+        `Add a phone number for ${smsMissingPhone.map((r: any) => r.name).join(', ')} before using SMS verification.`,
         400
       );
     }
@@ -266,6 +275,19 @@ export const sendService = {
         logger.warn({ err, documentId, userId }, 'Failed to record esign_sent tracking');
       }
     })();
+
+    void import('../../lib/webhookOutbound.js').then(({ emitOutboundWebhook }) =>
+      emitOutboundWebhook(
+        'document.sent',
+        {
+          documentId,
+          title: doc.title,
+          status: 'SENT',
+          recipientCount: recipients.length,
+        },
+        { userId }
+      )
+    );
 
     return { documentId, status: 'SENT', notified: [], deliveryPending: true };
   },
@@ -567,6 +589,7 @@ async function deliverInvitations(
   senderName: string,
   expiresAt: Date | null
 ): Promise<SendResult['notified']> {
+  const brand = await loadSignBranding(doc.ownerId);
   const results = await Promise.all(
     recipients.map(async (r) => {
       const token = tokens.get(r.id);
@@ -580,6 +603,7 @@ async function deliverInvitations(
         signUrl,
         message: doc.message,
         expiresAt,
+        brand,
       });
 
       try {

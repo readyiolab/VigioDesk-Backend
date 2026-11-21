@@ -336,4 +336,86 @@ export const templateService = {
 
     return signingService.getDocument(documentId, userId);
   },
+
+  /**
+   * Bulk-create drafts (optionally send) from a single-signer template + CSV rows.
+   * Each row becomes one document; merge map fills TEXT fields with matching config.mergeKey.
+   */
+  async bulkCreate(
+    templateId: string,
+    userId: string,
+    input: import('./signing.types').BulkTemplateInput
+  ) {
+    const tpl = await db.select('tbl_sign_template', '*', 'id = ? AND ownerId = ?', [
+      templateId,
+      userId,
+    ]);
+    if (!tpl) throw new AppError('Template not found', 404);
+
+    const roles = parseJson<TemplateRecipientRole[]>(tpl.recipientsJson, []);
+    const actionable = roles.filter((r) => r.role === 'SIGNER' || r.role === 'APPROVER');
+    if (actionable.length !== 1 || roles.length !== 1) {
+      throw new AppError(
+        'Bulk send works with templates that have exactly one signer/approver role.',
+        400
+      );
+    }
+
+    const batchId = crypto.randomUUID();
+    const created: { id: string; email: string; status: string }[] = [];
+    const errors: { email: string; error: string }[] = [];
+    const owner = await db.select('tbl_user', 'name, email', 'id = ?', [userId]);
+    const senderName = owner?.name || owner?.email || 'A sender';
+
+    for (const row of input.rows) {
+      try {
+        const doc = await this.createDocument(templateId, userId, {
+          recipients: [{ email: row.email, name: row.name }],
+        });
+        await db.execute(`UPDATE tbl_sign_document SET bulkBatchId = ? WHERE id = ?`, [
+          batchId,
+          doc.id,
+        ]);
+
+        if (row.merges && Object.keys(row.merges).length) {
+          const fields = await db.selectAll('tbl_sign_field', '*', 'documentId = ?', [doc.id]);
+          for (const f of fields as any[]) {
+            const config =
+              typeof f.config === 'string' ? JSON.parse(f.config || '{}') : f.config || {};
+            const key = String(config.mergeKey || f.label || '')
+              .trim()
+              .toLowerCase();
+            if (!key) continue;
+            const match = Object.entries(row.merges).find(
+              ([k]) => k.trim().toLowerCase() === key
+            );
+            if (!match) continue;
+            await db.execute(
+              `UPDATE tbl_sign_field SET value = ?, config = ? WHERE id = ?`,
+              [
+                match[1],
+                JSON.stringify({ ...config, defaultValue: match[1], mergeKey: key }),
+                f.id,
+              ]
+            );
+          }
+        }
+
+        if (input.autoSend) {
+          const { sendService } = await import('./send.service.js');
+          await sendService.send(doc.id, userId, senderName);
+          created.push({ id: doc.id, email: row.email, status: 'SENT' });
+        } else {
+          created.push({ id: doc.id, email: row.email, status: 'DRAFT' });
+        }
+      } catch (err) {
+        errors.push({
+          email: row.email,
+          error: err instanceof Error ? err.message : 'Failed',
+        });
+      }
+    }
+
+    return { batchId, created, errors };
+  },
 };

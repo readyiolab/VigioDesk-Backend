@@ -1,21 +1,15 @@
 import type { MailMessage } from '../../lib/mailer';
+import type { SignBranding } from './signBranding';
 
 /**
  * Transactional email bodies.
  *
  * Table-based layout with inline styles on purpose — this is not the place for
  * modern CSS. Outlook renders with Word's HTML engine (no flex, no grid, no
- * float), and Gmail strips <style> blocks in several clients. A layout that
- * looks right in a browser routinely collapses in a real inbox, so the visual
- * polish here comes from spacing, type and colour on tables — the same toolkit
- * transactional senders like Stripe and DigitalOcean use.
- *
- * Every message ships a plain-text alternative: a missing text/plain part is a
- * significant spam-score penalty, and these are already going out over a
- * personal Gmail account.
+ * float), and Gmail strips <style> blocks in several clients.
  */
 
-const BRAND = '#2563eb';
+const DEFAULT_BRAND = '#2563eb';
 const INK = '#0f172a';
 const BODY = '#334155';
 const MUTED = '#64748b';
@@ -27,9 +21,6 @@ const FONT =
   "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 
 function escapeHtml(value: string): string {
-  // Recipient names and document titles are user-supplied and land inside HTML
-  // we email out. Without escaping, a title of `<img src=x onerror=...>` is
-  // injected into whatever the recipient's client will execute.
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -38,14 +29,30 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/**
- * The shared shell: a light canvas, a single white card with a slim branded
- * top rule, a header, the body, and a quiet footer. `preheader` is the snippet
- * inboxes show next to the subject — hidden in the body but worth setting so the
- * preview isn't a scrape of the first visible words.
- */
-function layout(opts: { heading: string; preheader: string; bodyHtml: string }): string {
+type BrandOpts = Partial<SignBranding> | null | undefined;
+
+function resolveBrand(brand?: BrandOpts) {
+  const brandColor = brand?.brandColor && /^#([0-9a-f]{6})$/i.test(brand.brandColor)
+    ? brand.brandColor
+    : DEFAULT_BRAND;
+  const brandName = (brand?.brandName && brand.brandName.trim()) || 'PDFProduct';
+  const brandLogoUrl = brand?.brandLogoUrl?.trim() || null;
+  const initial = brandName.charAt(0).toUpperCase() || 'P';
+  return { brandColor, brandName, brandLogoUrl, initial };
+}
+
+function layout(opts: {
+  heading: string;
+  preheader: string;
+  bodyHtml: string;
+  brand?: BrandOpts;
+}): string {
   const { heading, preheader, bodyHtml } = opts;
+  const { brandColor, brandName, brandLogoUrl, initial } = resolveBrand(opts.brand);
+  const brandMark = brandLogoUrl
+    ? `<img src="${escapeHtml(brandLogoUrl)}" alt="" width="28" height="28" style="display:block;width:28px;height:28px;border-radius:7px;object-fit:cover;" />`
+    : `<td style="width:28px;height:28px;border-radius:7px;background:${brandColor};text-align:center;vertical-align:middle;font-size:15px;font-weight:700;color:#ffffff;font-family:${FONT};">${escapeHtml(initial)}</td>`;
+
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -61,21 +68,19 @@ function layout(opts: { heading: string; preheader: string; bodyHtml: string }):
       <tr>
         <td align="center" style="padding:32px 12px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:540px;width:100%;">
-            <!-- brand -->
             <tr>
               <td style="padding:0 4px 16px;">
                 <table role="presentation" cellpadding="0" cellspacing="0">
                   <tr>
-                    <td style="width:28px;height:28px;border-radius:7px;background:${BRAND};text-align:center;vertical-align:middle;font-size:15px;font-weight:700;color:#ffffff;font-family:${FONT};">P</td>
-                    <td style="padding-left:9px;font-size:15px;font-weight:600;color:${INK};font-family:${FONT};">PDFProduct</td>
+                    ${brandLogoUrl ? `<td style="width:28px;height:28px;">${brandMark}</td>` : brandMark}
+                    <td style="padding-left:9px;font-size:15px;font-weight:600;color:${INK};font-family:${FONT};">${escapeHtml(brandName)}</td>
                   </tr>
                 </table>
               </td>
             </tr>
-            <!-- card -->
             <tr>
               <td style="background:#ffffff;border:1px solid ${LINE};border-radius:14px;overflow:hidden;">
-                <div style="height:4px;background:${BRAND};font-size:0;line-height:0;">&nbsp;</div>
+                <div style="height:4px;background:${brandColor};font-size:0;line-height:0;">&nbsp;</div>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                   <tr>
                     <td style="padding:28px 34px 30px;">
@@ -86,14 +91,13 @@ function layout(opts: { heading: string; preheader: string; bodyHtml: string }):
                 </table>
               </td>
             </tr>
-            <!-- footer -->
             <tr>
               <td style="padding:22px 8px 0;">
                 <p style="margin:0 0 4px;font-size:12px;line-height:1.6;color:${MUTED};font-family:${FONT};">
-                  Sent by <strong style="color:${BODY};">PDFProduct</strong> · secure document signing
+                  Sent by <strong style="color:${BODY};">${escapeHtml(brandName)}</strong> · secure document signing
                 </p>
                 <p style="margin:0;font-size:11px;line-height:1.6;color:${FAINT};font-family:${FONT};">
-                  You received this because someone used PDFProduct to send you a document. If it wasn't expected, you can safely ignore it.
+                  You received this because someone used ${escapeHtml(brandName)} to send you a document. If it wasn't expected, you can safely ignore it.
                 </p>
               </td>
             </tr>
@@ -109,20 +113,16 @@ function paragraph(html: string, marginTop = 14): string {
   return `<p style="margin:${marginTop}px 0 0;font-size:15px;line-height:1.65;color:${BODY};">${html}</p>`;
 }
 
-function button(url: string, label: string): string {
-  // Bulletproof-ish button: the rounded background lives on the <a> so Outlook
-  // (which ignores padding on table cells inconsistently) still shows a filled
-  // pill rather than a bare link.
+function button(url: string, label: string, brandColor = DEFAULT_BRAND): string {
   return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 6px;">
     <tr>
-      <td style="border-radius:9px;background:${BRAND};box-shadow:0 1px 2px rgba(37,99,235,.25);">
+      <td style="border-radius:9px;background:${brandColor};box-shadow:0 1px 2px rgba(37,99,235,.25);">
         <a href="${url}" style="display:inline-block;padding:13px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:9px;font-family:${FONT};">${label} &rarr;</a>
       </td>
     </tr>
   </table>`;
 }
 
-/** A quiet inset panel for supporting detail (a personal note, a fallback link). */
 function panel(html: string): string {
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:18px 0 0;">
     <tr>
@@ -138,8 +138,10 @@ export function invitationEmail(params: {
   signUrl: string;
   message?: string | null;
   expiresAt: Date | null;
+  brand?: BrandOpts;
 }): MailMessage {
-  const { signerName, senderName, documentTitle, signUrl, message, expiresAt } = params;
+  const { signerName, senderName, documentTitle, signUrl, message, expiresAt, brand } = params;
+  const { brandColor } = resolveBrand(brand);
   const expiryLine = expiresAt
     ? `This link expires on <strong>${expiresAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</strong>. `
     : '';
@@ -147,6 +149,7 @@ export function invitationEmail(params: {
   const html = layout({
     heading: `${escapeHtml(senderName)} requested your signature`,
     preheader: `${senderName} sent you "${documentTitle}" to review and sign.`,
+    brand,
     bodyHtml: `
       ${paragraph(`Hi ${escapeHtml(signerName)},`)}
       ${paragraph(
@@ -163,13 +166,13 @@ export function invitationEmail(params: {
             )
           : ''
       }
-      ${button(signUrl, 'Review & sign')}
+      ${button(signUrl, 'Review & sign', brandColor)}
       <p style="margin:14px 0 0;font-size:13px;line-height:1.65;color:${MUTED};">
         ${expiryLine}Opening the link takes you straight to the document.
       </p>
       ${panel(
         `<p style="margin:0 0 6px;font-size:12px;line-height:1.5;color:${MUTED};">Button not working? Paste this link into your browser:</p>
-         <p style="margin:0;font-size:12px;line-height:1.5;word-break:break-all;"><a href="${signUrl}" style="color:${BRAND};text-decoration:none;">${signUrl}</a></p>`
+         <p style="margin:0;font-size:12px;line-height:1.5;word-break:break-all;"><a href="${signUrl}" style="color:${brandColor};text-decoration:none;">${signUrl}</a></p>`
       )}
       <p style="margin:16px 0 0;font-size:12px;line-height:1.6;color:${FAINT};">
         🔒 This link is personal to you. Please don't forward it — anyone who has it can open the document.
@@ -201,12 +204,14 @@ export function otpEmail(params: {
   code: string;
   documentTitle: string;
   ttlMinutes: number;
+  brand?: BrandOpts;
 }): Omit<MailMessage, 'to'> {
-  const { name, code, documentTitle, ttlMinutes } = params;
+  const { name, code, documentTitle, ttlMinutes, brand } = params;
 
   const html = layout({
     heading: 'Your verification code',
     preheader: `${code} — your code to sign "${documentTitle}". Expires in ${ttlMinutes} minutes.`,
+    brand,
     bodyHtml: `
       ${paragraph(`Hi ${escapeHtml(name)},`)}
       ${paragraph(
@@ -243,12 +248,15 @@ export function completionEmail(params: {
   name: string;
   documentTitle: string;
   downloadUrl: string;
+  brand?: BrandOpts;
 }): Omit<MailMessage, 'to'> {
-  const { name, documentTitle, downloadUrl } = params;
+  const { name, documentTitle, downloadUrl, brand } = params;
+  const { brandColor } = resolveBrand(brand);
 
   const html = layout({
     heading: 'Everyone has signed ✓',
     preheader: `"${documentTitle}" is fully signed — download your signed PDF.`,
+    brand,
     bodyHtml: `
       ${paragraph(`Hi ${escapeHtml(name)},`)}
       ${paragraph(
@@ -256,7 +264,7 @@ export function completionEmail(params: {
           documentTitle
         )}</strong> has been signed by everyone. Your signed PDF is ready to download. A separate Certificate of Completion is available from the document status page.`
       )}
-      ${button(downloadUrl, 'Download signed document')}
+      ${button(downloadUrl, 'Download signed document', brandColor)}
       <p style="margin:14px 0 0;font-size:13px;line-height:1.65;color:${MUTED};">
         The signed PDF contains only the signed document pages. Open the document in your account to download the Certificate of Completion.
       </p>

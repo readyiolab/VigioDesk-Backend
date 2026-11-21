@@ -1,5 +1,5 @@
 import type { PoolConnection } from 'mysql2/promise';
-import { ensureIndex } from './ddl';
+import { ensureColumn, ensureIndex } from './ddl';
 
 export async function initializeCustomerTrackingSchema(conn: PoolConnection): Promise<void> {
   await conn.query(`
@@ -109,6 +109,11 @@ export async function initializeCustomerTrackingSchema(conn: PoolConnection): Pr
       FOREIGN KEY (contactId) REFERENCES tbl_contact(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
+
+  await ensureColumn(conn, 'tbl_user_profile', 'brandName', 'VARCHAR(128) NULL AFTER company');
+  await ensureColumn(conn, 'tbl_user_profile', 'brandColor', 'VARCHAR(16) NULL AFTER brandName');
+  await ensureColumn(conn, 'tbl_user_profile', 'brandLogoUrl', 'VARCHAR(1024) NULL AFTER brandColor');
+  await ensureColumn(conn, 'tbl_user_profile', 'emailFromName', 'VARCHAR(128) NULL AFTER brandLogoUrl');
 
   await ensureIndex(conn, 'tbl_user_attribution', 'idx_attr_channel', 'acquisitionChannel');
   await ensureIndex(conn, 'tbl_user_attribution', 'idx_attr_last_seen', 'lastSeenAt');

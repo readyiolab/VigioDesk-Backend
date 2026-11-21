@@ -966,7 +966,7 @@ export const signingService = {
     }
 
     const row = await db.query(
-      `SELECT id, certificateKey, version FROM tbl_sign_document_version
+      `SELECT id, certificateKey, version, certificateFingerprint FROM tbl_sign_document_version
         WHERE documentId = ?
         ORDER BY version DESC LIMIT 1`,
       [documentId]
@@ -975,9 +975,22 @@ export const signingService = {
       throw new AppError('No certificate has been generated for this document.', 404);
     }
 
-    // Rebuild with the current letterhead so older seals pick up design updates
-    // without re-signing the document PDF.
-    const certificateBytes = await certificateService.build(documentId);
+    const { loadSignBranding } = await import('./signBranding.js');
+    const brand = await loadSignBranding(doc.ownerId);
+    const fingerprint = crypto
+      .createHash('sha256')
+      .update(
+        JSON.stringify({
+          documentId,
+          completedAt: doc.completedAt,
+          brandName: brand.brandName,
+          brandColor: brand.brandColor,
+          brandLogoUrl: brand.brandLogoUrl,
+          layout: 2,
+        })
+      )
+      .digest('hex');
+
     const folder = String(doc.fileKey || '')
       .replace(/\/original_.*$/, '')
       .replace(/\/converted_.*$/, '');
@@ -985,6 +998,16 @@ export const signingService = {
       row.certificateKey ||
       `${folder || `signing/doc-${documentId}`}/certificate_v${row.version ?? doc.currentVersion ?? 1}.pdf`;
 
+    const name = `${doc.title.replace(/[^a-zA-Z0-9 _-]/g, '')} (certificate).pdf`;
+
+    // Skip rebuild when letterhead inputs have not changed since the last write.
+    if (row.certificateKey && row.certificateFingerprint === fingerprint) {
+      return {
+        url: await getSignedDownloadUrl(certificateKey, name, undefined, doc.storageBindingId ?? null),
+      };
+    }
+
+    const certificateBytes = await certificateService.build(documentId);
     await putObjectBytes(
       certificateKey,
       certificateBytes,
@@ -992,14 +1015,11 @@ export const signingService = {
       doc.storageBindingId ?? null
     );
 
-    if (!row.certificateKey) {
-      await db.execute(`UPDATE tbl_sign_document_version SET certificateKey = ? WHERE id = ?`, [
-        certificateKey,
-        row.id,
-      ]);
-    }
+    await db.execute(
+      `UPDATE tbl_sign_document_version SET certificateKey = ?, certificateFingerprint = ? WHERE id = ?`,
+      [certificateKey, fingerprint, row.id]
+    );
 
-    const name = `${doc.title.replace(/[^a-zA-Z0-9 _-]/g, '')} (certificate).pdf`;
     return {
       url: await getSignedDownloadUrl(certificateKey, name, undefined, doc.storageBindingId ?? null),
     };

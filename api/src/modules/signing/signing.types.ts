@@ -257,6 +257,25 @@ export const useTemplateSchema = z.object({
   }),
 });
 
+export const bulkTemplateSchema = z.object({
+  params: z.object({
+    id: z.string().uuid('Invalid template id'),
+  }),
+  body: z.object({
+    rows: z
+      .array(
+        z.object({
+          email: z.string().email().max(255),
+          name: z.string().min(1).max(255).optional(),
+          merges: z.record(z.string().max(64), z.string().max(500)).optional(),
+        })
+      )
+      .min(1)
+      .max(100),
+    autoSend: z.boolean().optional().default(false),
+  }),
+});
+
 export type PresignDocumentInput = z.infer<typeof presignDocumentSchema>['body'];
 export type CreateDocumentInput = z.infer<typeof createDocumentSchema>['body'];
 export type ListDocumentsInput = z.infer<typeof listDocumentsSchema>['query'];
@@ -266,3 +285,4 @@ export type UpdateRecipientInput = z.infer<typeof updateRecipientSchema>['body']
 export type SaveFieldsInput = z.infer<typeof saveFieldsSchema>['body'];
 export type CreateTemplateInput = z.infer<typeof createTemplateSchema>['body'];
 export type UseTemplateInput = z.infer<typeof useTemplateSchema>['body'];
+export type BulkTemplateInput = z.infer<typeof bulkTemplateSchema>['body'];

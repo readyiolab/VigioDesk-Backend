@@ -6,6 +6,8 @@ import { logger } from '../../lib/logger';
 import { AppError } from '../../middleware/errorHandler.middleware';
 import { isMailerConfigured, sendMail } from '../../lib/mailer';
 import { otpEmail } from './email.templates';
+import { isSmsConfigured, maskPhone, sendSms } from './sms.service';
+import { loadSignBranding } from './signBranding';
 
 /** Lifetime of a code. Long enough to switch apps and read it, short enough to matter. */
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -30,22 +32,13 @@ export const otpService = {
       phone: string | null;
       authMethod: string;
     },
-    documentTitle: string
+    documentTitle: string,
+    ownerId?: string | null
   ): Promise<{ channel: 'email' | 'sms'; sentTo: string }> {
-    if (recipient.authMethod === 'SMS_OTP') {
-      throw new AppError(
-        'SMS verification is not available yet. Ask the sender to switch this recipient to email verification.',
-        503
-      );
-    }
-
-    if (!isMailerConfigured()) {
-      throw new AppError('Verification is temporarily unavailable. Please try again later.', 503);
-    }
-
     const code = generateCode();
     const codeHash = await bcrypt.hash(code, env.BCRYPT_OTP_ROUNDS);
     const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+    const brand = await loadSignBranding(ownerId);
 
     await db.update(
       'tbl_sign_recipient',
@@ -54,11 +47,34 @@ export const otpService = {
       [recipient.id]
     );
 
+    if (recipient.authMethod === 'SMS_OTP') {
+      if (!recipient.phone) {
+        throw new AppError('This signer needs a phone number for SMS verification.', 400);
+      }
+      if (!isSmsConfigured()) {
+        throw new AppError(
+          'SMS verification is not configured. Ask the sender to switch this recipient to email verification.',
+          503
+        );
+      }
+      await sendSms(
+        recipient.phone,
+        `${brand.brandName}: your code to sign "${documentTitle}" is ${code}. Expires in ${OTP_TTL_MS / 60000} minutes.`
+      );
+      logger.info({ recipientId: recipient.id }, 'SMS OTP issued');
+      return { channel: 'sms', sentTo: maskPhone(recipient.phone) };
+    }
+
+    if (!isMailerConfigured()) {
+      throw new AppError('Verification is temporarily unavailable. Please try again later.', 503);
+    }
+
     const mail = otpEmail({
       name: recipient.name,
       code,
       documentTitle,
       ttlMinutes: OTP_TTL_MS / 60000,
+      brand,
     });
     await sendMail({ to: recipient.email, ...mail });
 

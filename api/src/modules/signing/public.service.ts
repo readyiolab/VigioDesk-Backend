@@ -7,6 +7,7 @@ import { getRequestContext } from '../../lib/userAgent';
 import { signSigningSession } from '../../lib/signingSession';
 import { isMailerConfigured, sendMail } from '../../lib/mailer';
 import { invitationEmail } from './email.templates';
+import { loadSignBranding } from './signBranding';
 import { env } from '../../config/env';
 import { auditService } from './audit.service';
 import { otpService } from './otp.service';
@@ -173,6 +174,8 @@ export const publicSigningService = {
       ? await getSignedViewUrl(document.fileKey, 3600, document.storageBindingId ?? null)
       : null;
 
+    const branding = await loadSignBranding(document.ownerId);
+
     return {
       document: {
         id: document.id,
@@ -216,6 +219,11 @@ export const publicSigningService = {
         value: f.value,
         isMine: f.recipientId === recipient.id,
       })),
+      branding: {
+        name: branding.brandName,
+        primaryColor: branding.brandColor,
+        logoUrl: branding.brandLogoUrl,
+      },
       requiresOtp,
       requiresAccessCode,
       isVerified,
@@ -234,7 +242,7 @@ export const publicSigningService = {
       throw new AppError('This document does not require a verification code.', 400);
     }
 
-    const result = await otpService.issue(recipient, document.title);
+    const result = await otpService.issue(recipient, document.title, document.ownerId);
 
     await auditService.record(req, {
       documentId: document.id,
@@ -465,6 +473,20 @@ export const publicSigningService = {
       metadata: { fieldsFilled: resolved.filter((r) => r.value !== null).length },
     });
 
+    void import('../../lib/webhookOutbound.js').then(({ emitOutboundWebhook }) =>
+      emitOutboundWebhook(
+        'recipient.completed',
+        {
+          documentId: document.id,
+          title: document.title,
+          recipientId: recipient.id,
+          recipientName: recipient.name,
+          status: 'COMPLETED',
+        },
+        { userId: document.ownerId }
+      )
+    );
+
     // Burn the token. The signer is done, and leaving a live bearer credential
     // to a signed agreement in an inbox serves no one.
     await db.update(
@@ -547,6 +569,20 @@ export const publicSigningService = {
       detail: reason ? `${recipient.name} declined: ${reason}` : `${recipient.name} declined to sign`,
     });
 
+    void import('../../lib/webhookOutbound.js').then(({ emitOutboundWebhook }) =>
+      emitOutboundWebhook(
+        'document.declined',
+        {
+          documentId: document.id,
+          title: document.title,
+          recipientId: recipient.id,
+          reason: reason ?? null,
+          status: 'DECLINED',
+        },
+        { userId: document.ownerId }
+      )
+    );
+
     return { status: 'DECLINED' };
   },
 };
@@ -565,11 +601,13 @@ async function notifyNextSigner(document: any, req: Request): Promise<void> {
 
   const owner = await db.select('tbl_user', 'name', 'id = ?', [document.ownerId]);
   const senderName = owner?.name || 'A sender';
+  const brand = await loadSignBranding(document.ownerId);
 
   const mail = invitationEmail({
     signerName: next.name,
     senderName,
     documentTitle: document.title,
+    brand,
     // `/s/` — see the note in send.service.ts. Must stay in step with it.
     signUrl: `${env.APP_URL.replace(/\/$/, '')}/s/${next.signingToken}`,
     message: document.message,

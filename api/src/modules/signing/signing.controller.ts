@@ -344,4 +344,23 @@ export const signingController = {
       next(err);
     }
   },
+
+  async bulkTemplate(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await templateService.bulkCreate(req.params.id, req.user.id, req.body);
+      res.status(201).json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async detectFields(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { fieldDetectService } = await import('./fieldDetect.service.js');
+      const fields = await fieldDetectService.detectForDocument(req.params.id, req.user.id);
+      res.status(200).json({ fields });
+    } catch (err) {
+      next(err);
+    }
+  },
 };

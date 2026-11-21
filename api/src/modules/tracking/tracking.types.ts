@@ -33,6 +33,17 @@ export const profileUpdateSchema = z.object({
     state: z.string().max(128).optional().nullable(),
     postalCode: z.string().max(32).optional().nullable(),
     country: z.string().max(64).optional().nullable(),
+    brandName: z.string().max(128).optional().nullable(),
+    brandColor: z
+      .string()
+      .max(16)
+      .optional()
+      .nullable()
+      .refine((v) => !v || /^#([0-9A-Fa-f]{6})$/.test(v), 'Use a hex color like #2563eb'),
+    brandLogoUrl: z
+      .union([z.string().url().max(1024), z.literal(''), z.null()])
+      .optional(),
+    emailFromName: z.string().max(128).optional().nullable(),
   }),
   query: emptyQuery,
   params: emptyParams,

@@ -6,6 +6,8 @@ import { fetchWithTimeout } from './httpFetch';
 export type OutboundEventType =
   | 'document.completed'
   | 'document.declined'
+  | 'document.sent'
+  | 'recipient.completed'
   | 'letter.batch.sent'
   | 'webreport.ready'
   | 'webreport.failed'

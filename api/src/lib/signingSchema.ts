@@ -198,6 +198,14 @@ export async function initializeSigningSchema(conn: PoolConnection): Promise<voi
   await ensureColumn(conn, 'tbl_sign_recipient', 'reminderCount', 'INT NOT NULL DEFAULT 0 AFTER lastRemindedAt');
   await ensureColumn(conn, 'tbl_sign_document', 'sourceFileKey', 'VARCHAR(512) NULL AFTER originalHash');
   await ensureColumn(conn, 'tbl_sign_document', 'sourceFileName', 'VARCHAR(255) NULL AFTER sourceFileKey');
+  await ensureColumn(conn, 'tbl_sign_document', 'bulkBatchId', 'VARCHAR(255) NULL AFTER sourceFileName');
+  await ensureColumn(
+    conn,
+    'tbl_sign_document_version',
+    'certificateFingerprint',
+    'CHAR(64) NULL AFTER tsaTokenKey'
+  );
+  await ensureIndex(conn, 'tbl_sign_document', 'idx_sign_doc_bulk_batch', 'ownerId, bulkBatchId');
 
   // Query-path indexes (idempotent — safe on existing databases too).
   await ensureIndex(conn, 'tbl_sign_document', 'idx_sign_doc_owner_status', 'ownerId, status');
